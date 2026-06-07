@@ -261,7 +261,7 @@ async def test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("📞 پشتیبانی: @Shadowlini \n @Mohammadfd8", reply_markup=get_back_button())
+    await query.edit_message_text("📞 پشتیبانی: \n @Shadowlini \n @Mohammadfd8", reply_markup=get_back_button())
 
 
 # ==================== ADMIN PANEL ====================
@@ -498,7 +498,7 @@ async def get_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     await update.message.reply_text(f"✅ درخواست شماره {payment_id} با موفقیت رد شد.\nدلیل: {reason}\n\nبه کاربر اطلاع داده شد.", reply_markup=get_admin_panel_keyboard(is_owner(update.effective_user.id)))
     try:
-        await context.bot.send_message(chat_id=user_id, text=f"❌ **درخواست شارژ شما رد شد!**\n\n💰 مبلغ: {amount:,} تومان\n📝 **دلیل رد:** {reason}\n\nلطفاً برای رفع مشکل با پشتیبانی تماس بگیرید یا مجدداً تلاش کنید.\n📞 پشتیبانی: @Shadowlini \n @Mohammadfd8", parse_mode='Markdown')
+        await context.bot.send_message(chat_id=user_id, text=f"❌ **درخواست شارژ شما رد شد!**\n\n💰 مبلغ: {amount:,} تومان\n📝 **دلیل رد:** {reason}\n\nلطفاً برای رفع مشکل با پشتیبانی تماس بگیرید یا مجدداً تلاش کنید.\n📞 پشتیبانی:\n @Shadowlini \n @Mohammadfd8", parse_mode='Markdown')
     except Exception as e:
         logger.error(f"Could not notify user: {e}")
         await update.message.reply_text(f"⚠️ پیام برای کاربر ارسال نشد (ربات را بلاک کرده)")
