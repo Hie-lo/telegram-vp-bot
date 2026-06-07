@@ -92,12 +92,39 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         )
     ''')
+        # Admins table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS admins (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            added_by INTEGER,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_owner BOOLEAN DEFAULT 0,
+            FOREIGN KEY (added_by) REFERENCES users(user_id)
+        )
+    ''')
+        # Payment logs table (for accounting)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS payment_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payment_id INTEGER NOT NULL,
+            admin_id INTEGER NOT NULL,
+            admin_username TEXT,
+            user_id INTEGER NOT NULL,
+            user_username TEXT,
+            amount INTEGER NOT NULL,
+            status TEXT NOT NULL,  -- 'approved' or 'rejected'
+            reject_reason TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
 
 
     conn.commit()
     conn.close()
     init_payment_table()
     add_reject_reason_column()
+    init_default_owner()
 # User operations
 def add_user(user_id: int, username: str = None, first_name: str = None):
     """Add new user to database"""
@@ -161,10 +188,11 @@ def add_plan(name: str, traffic_gb: int, duration_days: int, price_rial: int):
     conn.close()
 
 def get_active_plans() -> List[Dict]:
-    """Get all active plans"""
+    """Get all active plans sorted by traffic (small to large)"""
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM plans WHERE is_active = 1 ORDER BY price_rial')
+    # تغییر: ORDER BY traffic_gb ASC (قبلاً ORDER BY price_rial بود)
+    cursor.execute('SELECT * FROM plans WHERE is_active = 1 ORDER BY traffic_gb ASC')
     plans = cursor.fetchall()
     conn.close()
     return [dict(plan) for plan in plans]
@@ -402,3 +430,243 @@ def delete_plan(plan_id: int) -> bool:
     success = cursor.rowcount > 0
     conn.close()
     return success
+
+# ==================== Admin Management ====================
+
+def init_default_owner():
+    """Initialize default owner from config.ADMIN_USER_ID if admins table is empty"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM admins')
+    count = cursor.fetchone()[0]
+    conn.close()
+    
+    if count == 0:
+        import config
+        owner_id = config.ADMIN_USER_ID
+        # Get user info (user should already exist from start)
+        user = get_user(owner_id)
+        username = user['username'] if user else None
+        add_admin(owner_id, username, None, is_owner=True)
+        print(f"✅ Owner {owner_id} added as initial admin")
+
+def is_admin(user_id: int) -> bool:
+    """Check if user is admin (including owner)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM admins WHERE user_id = ?', (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result is not None
+
+def is_owner(user_id: int) -> bool:
+    """Check if user is the owner"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM admins WHERE user_id = ? AND is_owner = 1', (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result is not None
+
+def add_admin(user_id: int, username: str = None, added_by: int = None, is_owner: bool = False) -> bool:
+    """Add a new admin (only owner can call this)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT OR REPLACE INTO admins (user_id, username, added_by, is_owner)
+            VALUES (?, ?, ?, ?)
+        ''', (user_id, username, added_by, 1 if is_owner else 0))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error adding admin: {e}")
+        return False
+    finally:
+        conn.close()
+
+def remove_admin(user_id: int) -> bool:
+    """Remove an admin (cannot remove owner)"""
+    if is_owner(user_id):
+        return False
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM admins WHERE user_id = ?', (user_id,))
+    conn.commit()
+    deleted = cursor.rowcount > 0
+    conn.close()
+    return deleted
+
+def get_all_admins() -> List[Dict]:
+    """Get list of all admins with details"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT a.user_id, a.username, a.added_at, a.is_owner, u.first_name
+        FROM admins a
+        LEFT JOIN users u ON a.user_id = u.user_id
+        ORDER BY a.is_owner DESC, a.added_at ASC
+    ''')
+    admins = cursor.fetchall()
+    conn.close()
+    return [dict(admin) for admin in admins]
+
+def get_admin_by_username(username: str):
+    """Get admin by username (without @)"""
+    username = username.lstrip('@')
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM admins WHERE username = ?', (username,))
+    result = cursor.fetchone()
+    conn.close()
+    return dict(result) if result else None
+
+# ==================== Payment Logs (Accounting) ====================
+
+def add_payment_log(payment_id: int, admin_id: int, admin_username: str, user_id: int, user_username: str, amount: int, status: str, reject_reason: str = None):
+    """Add a record to payment_logs when a payment is approved or rejected"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO payment_logs (payment_id, admin_id, admin_username, user_id, user_username, amount, status, reject_reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (payment_id, admin_id, admin_username, user_id, user_username, amount, status, reject_reason))
+    conn.commit()
+    conn.close()
+
+def get_all_payment_logs(limit: int = None):
+    """Get all payment logs, ordered by newest first"""
+    conn = get_db()
+    cursor = conn.cursor()
+    query = 'SELECT * FROM payment_logs ORDER BY created_at DESC'
+    if limit:
+        query += f' LIMIT {limit}'
+    cursor.execute(query)
+    logs = cursor.fetchall()
+    conn.close()
+    return [dict(log) for log in logs]
+
+def export_payment_logs_to_excel():
+    """Generate Excel file from all payment logs and return file path"""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import tempfile
+    import os
+    
+    logs = get_all_payment_logs()
+    
+    # Create workbook and sheet
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "تراکنش‌های مالی"
+    
+    # Headers
+    headers = ['شناسه', 'شناسه درخواست', 'ادمین (ID)', 'ادمین (یوزرنیم)', 'کاربر (ID)', 'کاربر (یوزرنیم)', 'مبلغ (تومان)', 'وضعیت', 'دلیل رد', 'تاریخ']
+    ws.append(headers)
+    
+    # Style headers
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    for col in range(1, len(headers)+1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+    
+    # Add data
+    for log in logs:
+        ws.append([
+            log['id'],
+            log['payment_id'],
+            log['admin_id'],
+            log['admin_username'] or '',
+            log['user_id'],
+            log['user_username'] or '',
+            log['amount'],
+            'تأیید شده' if log['status'] == 'approved' else 'رد شده',
+            log['reject_reason'] or '',
+            log['created_at']
+        ])
+    
+    # Adjust column widths
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = min(max_length + 2, 30)
+        ws.column_dimensions[col_letter].width = adjusted_width
+    
+    # Save to temporary file
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    wb.save(temp_file.name)
+    temp_file.close()
+    return temp_file.name
+
+
+# ==================== Advanced Statistics ====================
+
+def get_total_approved_deposits() -> int:
+    """مجموع مبالغ تراکنش‌های شارژ تأیید شده (از payment_logs با status='approved')"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT SUM(amount) FROM payment_logs WHERE status = "approved"')
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total if total else 0
+
+def get_best_selling_plan() -> Optional[Dict]:
+    """پرفروش‌ترین پلن بر اساس تعداد سفارشات تکمیل شده"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT p.id, p.name, p.traffic_gb, p.duration_days, p.price_rial, COUNT(o.id) as sales_count
+        FROM plans p
+        JOIN orders o ON p.id = o.plan_id
+        WHERE o.status = 'completed'
+        GROUP BY p.id
+        ORDER BY sales_count DESC
+        LIMIT 1
+    ''')
+    result = cursor.fetchone()
+    conn.close()
+    return dict(result) if result else None
+
+def get_current_month_stats() -> Dict:
+    """آمار ماه جاری: کاربران جدید، سفارشات جدید، درآمد ماه"""
+    conn = get_db()
+    cursor = conn.cursor()
+    now = datetime.now()
+    first_day_of_month = datetime(now.year, now.month, 1).strftime('%Y-%m-%d %H:%M:%S')
+    
+    # کاربران جدید این ماه
+    cursor.execute('SELECT COUNT(*) FROM users WHERE created_at >= ?', (first_day_of_month,))
+    new_users = cursor.fetchone()[0]
+    
+    # سفارشات تکمیل شده این ماه
+    cursor.execute('SELECT COUNT(*) FROM orders WHERE status = "completed" AND created_at >= ?', (first_day_of_month,))
+    new_orders = cursor.fetchone()[0]
+    
+    # درآمد این ماه (مجموع مبالغ سفارشات تکمیل شده)
+    cursor.execute('SELECT SUM(amount) FROM orders WHERE status = "completed" AND created_at >= ?', (first_day_of_month,))
+    revenue = cursor.fetchone()[0] or 0
+    
+    conn.close()
+    return {
+        'new_users': new_users,
+        'new_orders': new_orders,
+        'revenue': revenue
+    }
+
+def get_total_orders_count() -> int:
+    """تعداد کل سفارشات تکمیل شده"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM orders WHERE status = "completed"')
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
