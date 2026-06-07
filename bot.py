@@ -903,6 +903,7 @@ async def admin_manage_admins(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.edit_message_text("👑 **مدیریت ادمین‌ها**\n\nلطفاً گزینه مورد نظر را انتخاب کنید:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def add_admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("DEBUG: add_admin_start called")
     query = update.callback_query
     await query.answer()
     if not is_owner(query.from_user.id):
@@ -1147,6 +1148,7 @@ def main():
     app.add_handler(add_plan_conv)
     app.add_handler(add_admin_conv)
     app.add_handler(remove_admin_conv)
+    app.add_handler(CommandHandler("addadmin", add_admin_start))
 
     app.add_handler(CallbackQueryHandler(back_to_main, pattern="^back_to_main$"))
     app.add_handler(CallbackQueryHandler(show_wallet, pattern="^wallet$"))
