@@ -353,6 +353,11 @@ async def add_plan_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # پایان مکالمه
     return ConversationHandler.END
 
+async def manual_charge_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """لغو عملیات جاری (شارژ دستی، کاهش موجودی، تست، و ...)"""
+    await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=get_main_keyboard(update.effective_user.id))
+    return ConversationHandler.END
+
 async def admin_stats_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -799,8 +804,6 @@ async def debit_get_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== ADD PLAN WITH CONVERSATION ====================
 
 async def add_plan_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for key in ['new_plan_name', 'new_plan_traffic', 'new_plan_duration']:
-        context.user_data.pop(key, None)
     if update.callback_query:
         query = update.callback_query
         await query.answer()
