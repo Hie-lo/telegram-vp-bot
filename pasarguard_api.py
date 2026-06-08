@@ -121,7 +121,9 @@ class PasarGuardAPI:
             "data_limit": data_limit_bytes,
             "expire": expire_timestamp,
             "status": "active",
-            "data_limit_reset_strategy": "no_reset"
+            "data_limit_reset_strategy": "no_reset",
+            "group_ids": [9,8]
+            #15 , 9 , 8
         }
         
         print(f"📤 Sending: {traffic_gb}GB = {data_limit_bytes} bytes, expire timestamp: {expire_timestamp}")
