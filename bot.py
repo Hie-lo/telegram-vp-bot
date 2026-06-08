@@ -1149,6 +1149,7 @@ def main():
     app.add_handler(add_admin_conv)
     app.add_handler(remove_admin_conv)
     app.add_handler(CommandHandler("addadmin", add_admin_start))
+    app.add_handler(CommandHandler("addplan", add_plan_start))
 
     app.add_handler(CallbackQueryHandler(back_to_main, pattern="^back_to_main$"))
     app.add_handler(CallbackQueryHandler(show_wallet, pattern="^wallet$"))
