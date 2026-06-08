@@ -343,8 +343,14 @@ async def admin_charge_get_amount(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("❌ خطا در شارژ کیف پول!")
     return ConversationHandler.END
 
-async def manual_charge_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=get_main_keyboard(update.effective_user.id))
+async def add_plan_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel add plan conversation and clear all related data"""
+    # پاک کردن اطلاعات موقت
+    for key in ['new_plan_name', 'new_plan_traffic', 'new_plan_duration']:
+        context.user_data.pop(key, None)
+    # ارسال پیام لغو
+    await update.message.reply_text("❌ عملیات افزودن پلن لغو شد.", reply_markup=get_main_keyboard(update.effective_user.id))
+    # پایان مکالمه
     return ConversationHandler.END
 
 async def admin_stats_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -793,6 +799,8 @@ async def debit_get_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== ADD PLAN WITH CONVERSATION ====================
 
 async def add_plan_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    for key in ['new_plan_name', 'new_plan_traffic', 'new_plan_duration']:
+        context.user_data.pop(key, None)
     if update.callback_query:
         query = update.callback_query
         await query.answer()
@@ -1094,6 +1102,7 @@ def main():
             ASK_PLAN_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_plan_get_price)],
         },
         fallbacks=[CommandHandler("cancel", add_plan_cancel)],
+        allow_reentry=True
     )
     charge_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_charge_by_id_start, pattern="^charge_by_id$"), CallbackQueryHandler(admin_charge_by_username_start, pattern="^charge_by_username$")],
