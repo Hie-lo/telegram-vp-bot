@@ -9,6 +9,8 @@ from telegram.ext import (
 import config
 import database as db
 from pasarguard_api import PasarGuardAPI
+import subprocess
+import sys
 
 # Enable logging
 logging.basicConfig(
@@ -68,7 +70,8 @@ def get_admin_panel_keyboard(owner: bool = False):
         keyboard.insert(0, [InlineKeyboardButton("💳 شارژ دستی کاربر", callback_data="admin_manual_charge"), InlineKeyboardButton("➖ کاهش موجودی کاربر", callback_data="admin_debit_balance")])
         keyboard.insert(3, [InlineKeyboardButton("📊 گزارش تراکنش‌ها", callback_data="export_transactions")])
         keyboard.insert(4, [InlineKeyboardButton("📈 آمار پیشرفته", callback_data="advanced_stats")])
-        keyboard.insert(2, [InlineKeyboardButton("👑 مدیریت ادمین‌ها", callback_data="admin_manage_admins")])  # قبلاً بود
+        keyboard.insert(2, [InlineKeyboardButton("👑 مدیریت ادمین‌ها", callback_data="admin_manage_admins")])  
+        keyboard.insert(5, [InlineKeyboardButton("🔄 ری‌استارت ربات", callback_data="restart_bot")])
     keyboard.append([InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main")])
     return InlineKeyboardMarkup(keyboard)
 
@@ -234,9 +237,17 @@ async def handle_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.update_balance(user_id, -plan['price_rial'])
     order_id = db.create_order(user_id, plan['id'], plan['price_rial'])
     await query.edit_message_text("⏳ در حال ساخت کانفیگ...", reply_markup=get_back_button())
-    result = pg_api.create_user(traffic_gb=plan['traffic_gb'], expire_days=plan['duration_days'], username=f"user_{user_id}_{order_id}")
+    panel_username = f"user_{user_id}_{order_id}"
+    result = pg_api.create_user(traffic_gb=plan['traffic_gb'], expire_days=plan['duration_days'], username=panel_username)
     if result and result.get('success'):
+        # ذخیره لینک و نام کاربری پنل در سفارش
         db.update_order_config(order_id, result['config_link'])
+        # اضافه کردن ستون panel_username قبلاً باید انجام شده باشد
+        conn = db.get_db()
+        cursor = conn.cursor()
+        cursor.execute('UPDATE orders SET panel_username = ? WHERE id = ?', (panel_username, order_id))
+        conn.commit()
+        conn.close()
         await query.edit_message_text(f"✅ **خرید موفق!**\n\n🔗 لینک اشتراک:\n`{result['config_link']}`", parse_mode='Markdown', reply_markup=get_back_button())
     else:
         db.update_balance(user_id, plan['price_rial'])
@@ -1087,6 +1098,21 @@ async def advanced_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
 
+async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(query.from_user.id):
+        await query.edit_message_text("❌ فقط مالک ربات به این بخش دسترسی دارد.", reply_markup=get_back_button())
+        return
+    await query.edit_message_text("🔄 در حال ری‌استارت ربات... لطفاً چند لحظه صبر کنید.")
+    
+    # ری‌استارت سرویس systemd
+    subprocess.Popen(["sudo", "systemctl", "restart", "telegram-bot.service"])
+    
+    # خروج از برنامه (ربات متوقف می‌شود و systemd آن را دوباره راه‌اندازی می‌کند)
+    sys.exit(0)
+
+
 # ==================== MAIN ====================
 
 def main():
@@ -1162,6 +1188,7 @@ def main():
     app.add_handler(remove_admin_conv)
     app.add_handler(CommandHandler("addadmin", add_admin_start))
     app.add_handler(CommandHandler("addplan", add_plan_start))
+    app.add_handler(CallbackQueryHandler(restart_bot, pattern="^restart_bot$"))
 
     app.add_handler(CallbackQueryHandler(back_to_main, pattern="^back_to_main$"))
     app.add_handler(CallbackQueryHandler(show_wallet, pattern="^wallet$"))

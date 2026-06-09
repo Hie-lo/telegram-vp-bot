@@ -119,12 +119,16 @@ def init_db():
         )
     ''')
 
+    
+
 
     conn.commit()
     conn.close()
     init_payment_table()
+    add_panel_username_column()
     add_reject_reason_column()
     init_default_owner()
+    
 # User operations
 def add_user(user_id: int, username: str = None, first_name: str = None):
     """Add new user to database"""
@@ -670,3 +674,15 @@ def get_total_orders_count() -> int:
     count = cursor.fetchone()[0]
     conn.close()
     return count
+
+
+def add_panel_username_column():
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('ALTER TABLE orders ADD COLUMN panel_username TEXT')
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    finally:
+        conn.close()
