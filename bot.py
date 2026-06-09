@@ -365,7 +365,18 @@ async def add_plan_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def manual_charge_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """لغو عملیات جاری (شارژ دستی، کاهش موجودی، تست، و ...)"""
+    """لغو عملیات جاری (شارژ دستی، کاهش موجودی، مدیریت ادمین، و ...)"""
+    # کلیدهای مربوط به مکالمه‌های مختلف
+    keys_to_remove = [
+    'charge_user_id', 'charge_username',
+    'debit_user_id', 'debit_username', 'debit_current_balance',
+    'reject_payment_id', 'reject_user_id', 'reject_amount', 'reject_message_id',
+    'test_user_id', 'test_username',
+    'new_plan_name', 'new_plan_traffic', 'new_plan_duration',
+    'payment_amount', 'waiting_for_receipt' 
+    ]
+    for key in keys_to_remove:
+        context.user_data.pop(key, None)
     await update.message.reply_text("❌ عملیات لغو شد.", reply_markup=get_main_keyboard(update.effective_user.id))
     return ConversationHandler.END
 
@@ -1137,21 +1148,25 @@ def main():
         entry_points=[CallbackQueryHandler(admin_charge_by_id_start, pattern="^charge_by_id$"), CallbackQueryHandler(admin_charge_by_username_start, pattern="^charge_by_username$")],
         states={ASK_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, manual_charge_get_user)], ASK_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_charge_get_amount)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
+        allow_reentry=True
     )
     test_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_test_by_id_start, pattern="^admin_test_by_id$"), CallbackQueryHandler(admin_test_by_username_start, pattern="^admin_test_by_username$")],
         states={ASK_TEST_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_test_get_user)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
+        allow_reentry=True
     )
     payment_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(rial_payment_start, pattern="^rial_payment$")],
         states={ASK_PAYMENT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, rial_payment_get_amount)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
+        allow_reentry=True
     )
     reject_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(reject_payment, pattern="^reject_payment_\\d+$")],
         states={ASK_REJECT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_reject_reason), CallbackQueryHandler(cancel_reject_callback, pattern="^cancel_reject$")]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
+        allow_reentry=True
     )
     debit_conv = ConversationHandler(
         entry_points=[
@@ -1163,16 +1178,19 @@ def main():
             ASK_DEBIT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, debit_get_amount)]
         },
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
+        allow_reentry=True
     )
     add_admin_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_admin_start, pattern="^add_admin$")],
         states={ASK_ADMIN_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_admin_get_user)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
+        allow_reentry=True
     )
     remove_admin_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(remove_admin_start, pattern="^remove_admin$")],
         states={ASK_REMOVE_ADMIN_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_admin_get_user)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
+        allow_reentry=True
     )
 
     app.add_handler(CommandHandler("start", start))
