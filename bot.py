@@ -2019,57 +2019,6 @@ async def broadcast_type_handler(update: Update, context: ContextTypes.DEFAULT_T
         return ASK_BROADCAST_CONTENT
 
 # ---------- دریافت محتوا (متن یا فایل) ----------
-async def broadcast_get_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg_type = context.user_data.get('broadcast_type')
-    if msg_type == 'text':
-        text = update.message.text
-        if not text:
-            await update.message.reply_text("❌ متن نمی‌تواند خالی باشد. دوباره ارسال کنید.")
-            return ASK_BROADCAST_CONTENT
-        context.user_data['broadcast_content'] = text
-        context.user_data['broadcast_caption'] = None
-        await ask_broadcast_filter(update, context)
-        return ConversationHandler.END
-    else:
-        # دریافت فایل
-        file_id = None
-        if msg_type == 'photo' and update.message.photo:
-            file_id = update.message.photo[-1].file_id
-        elif msg_type == 'video' and update.message.video:
-            file_id = update.message.video.file_id
-        elif msg_type == 'document' and update.message.document:
-            file_id = update.message.document.file_id
-        elif msg_type == 'voice' and update.message.voice:
-            file_id = update.message.voice.file_id
-        else:
-            await update.message.reply_text("❌ نوع فایل ارسالی با نوع انتخابی همخوانی ندارد. دوباره تلاش کنید.")
-            return ASK_BROADCAST_CONTENT
-        
-        context.user_data['broadcast_content'] = file_id
-        # اگر کپشن وجود داشت، ذخیره کن (برای voice کپشن نداریم)
-        if msg_type != 'voice' and update.message.caption:
-            context.user_data['broadcast_caption'] = update.message.caption
-        else:
-            context.user_data['broadcast_caption'] = None
-        
-        await ask_broadcast_filter(update, context)
-        return ConversationHandler.END
-
-async def ask_broadcast_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """نمایش گزینه‌های فیلتر مخاطبان"""
-    keyboard = [
-        [InlineKeyboardButton("👥 همه کاربران", callback_data="broadcast_filter_all")],
-        [InlineKeyboardButton("🎁 کاربران تست‌دهنده", callback_data="broadcast_filter_tested")],
-        [InlineKeyboardButton("🛒 کاربران خریدار", callback_data="broadcast_filter_buyers")],
-        [InlineKeyboardButton("📆 کاربران فعال (۷ روز اخیر)", callback_data="broadcast_filter_active_7d")],
-        [InlineKeyboardButton("🔙 انصراف", callback_data="broadcast_menu")]
-    ]
-    await update.message.reply_text(
-        "📊 **انتخاب مخاطبان**\n\nلطفاً گروه هدف خود را انتخاب کنید:",
-        parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-    return ASK_BROADCAST_FILTER
 
 async def broadcast_filter_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -2164,7 +2113,51 @@ async def send_broadcast_messages(app, broadcast_id, admin_id, msg_type, content
         parse_mode='Markdown'
     )
 
-
+async def broadcast_get_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت محتوا (متن یا فایل) برای ارسال همگانی"""
+    msg_type = context.user_data.get('broadcast_type')
+    if msg_type == 'text':
+        text = update.message.text
+        if not text:
+            await update.message.reply_text("❌ متن نمی‌تواند خالی باشد. دوباره ارسال کنید.")
+            return ASK_BROADCAST_CONTENT
+        context.user_data['broadcast_content'] = text
+        context.user_data['broadcast_caption'] = None
+    else:
+        # دریافت فایل
+        file_id = None
+        if msg_type == 'photo' and update.message.photo:
+            file_id = update.message.photo[-1].file_id
+        elif msg_type == 'video' and update.message.video:
+            file_id = update.message.video.file_id
+        elif msg_type == 'document' and update.message.document:
+            file_id = update.message.document.file_id
+        elif msg_type == 'voice' and update.message.voice:
+            file_id = update.message.voice.file_id
+        else:
+            await update.message.reply_text("❌ نوع فایل ارسالی با نوع انتخابی همخوانی ندارد. دوباره تلاش کنید.")
+            return ASK_BROADCAST_CONTENT
+        
+        context.user_data['broadcast_content'] = file_id
+        if msg_type != 'voice' and update.message.caption:
+            context.user_data['broadcast_caption'] = update.message.caption
+        else:
+            context.user_data['broadcast_caption'] = None
+    
+    # --- بعد از دریافت محتوا، کیبورد فیلتر را نمایش بده و به حالت بعدی برو ---
+    keyboard = [
+        [InlineKeyboardButton("👥 همه کاربران", callback_data="broadcast_filter_all")],
+        [InlineKeyboardButton("🎁 کاربران تست‌دهنده", callback_data="broadcast_filter_tested")],
+        [InlineKeyboardButton("🛒 کاربران خریدار", callback_data="broadcast_filter_buyers")],
+        [InlineKeyboardButton("📆 کاربران فعال (۷ روز اخیر)", callback_data="broadcast_filter_active_7d")],
+        [InlineKeyboardButton("🔙 انصراف", callback_data="broadcast_menu")]
+    ]
+    await update.message.reply_text(
+        "📊 **انتخاب مخاطبان**\n\nلطفاً گروه هدف خود را انتخاب کنید:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return ASK_BROADCAST_FILTER
 # ==================== MAIN ====================
 
 def main():
@@ -2184,35 +2177,34 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", add_plan_cancel)],
         allow_reentry=True,
-        per_message=True
     )
     charge_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_charge_by_id_start, pattern="^charge_by_id$"), CallbackQueryHandler(admin_charge_by_username_start, pattern="^charge_by_username$")],
         states={ASK_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, manual_charge_get_user)], ASK_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_charge_get_amount)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        per_message=True
+        
     )
     test_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_test_by_id_start, pattern="^admin_test_by_id$"), CallbackQueryHandler(admin_test_by_username_start, pattern="^admin_test_by_username$")],
         states={ASK_TEST_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_test_get_user)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        per_message=True
+        
     )
     payment_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(rial_payment_start, pattern="^rial_payment$")],
         states={ASK_PAYMENT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, rial_payment_get_amount)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        per_message=True
+        
     )
     reject_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(reject_payment, pattern="^reject_payment_\\d+$")],
         states={ASK_REJECT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_reject_reason), CallbackQueryHandler(cancel_reject_callback, pattern="^cancel_reject$")]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        per_message=True
+        
     )
     debit_conv = ConversationHandler(
         entry_points=[
@@ -2225,21 +2217,21 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        per_message=True
+        
     )
     add_admin_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_admin_start, pattern="^add_admin$")],
         states={ASK_ADMIN_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_admin_get_user)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        per_message=True
+        
     )
     remove_admin_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(remove_admin_start, pattern="^remove_admin$")],
         states={ASK_REMOVE_ADMIN_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_admin_get_user)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        per_message=True
+        
     )
         # conversation: edit test reminder text
     edit_reminder_text_conv = ConversationHandler(
