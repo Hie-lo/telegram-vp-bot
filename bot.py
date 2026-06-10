@@ -19,6 +19,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 pg_api = PasarGuardAPI()
 
 # Conversation states
@@ -165,7 +166,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
 async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except:
+        pass  # نادیده گرفتن خطای منقضی شدن
     await query.edit_message_text("✨ منوی اصلی:", reply_markup=get_main_keyboard(query.from_user.id))
 
 async def show_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1371,35 +1375,39 @@ async def manual_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def referral_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """نمایش منوی رفرال و اطلاعات دعوت"""
-    query = update.callback_query
-    await query.answer()
-    user_id = query.from_user.id
-    
-    # اگر کاربر کد رفرال ندارد، یکی بساز
-    user = db.get_user(user_id)
-    if not user.get('referral_code'):
-        db.generate_unique_referral_code(user_id)
-        user = db.get_user(user_id)  # به‌روزرسانی
-    
-    referral_code = user.get('referral_code')
-    stats = db.get_referral_stats(user_id)
-    settings = db.get_referral_settings()
-    
-    text = f"🔗 **سیستم دعوت از دوستان**\n\n"
-    text += f"لینک دعوت شما:\n`https://t.me/{context.bot.username}?start={referral_code}`\n\n"
-    text += f"🎁 **پاداش‌ها:**\n"
-    text += f"• به ازای هر دوست دعوت شده: {settings.get('signup_bonus_referrer', 0):,} تومان\n"
-    text += f"• دوست شما نیز {settings.get('signup_bonus_referred', 0):,} تومان هدیه می‌گیرد\n"
-    text += f"• از هر خرید دوستتان، {settings.get('purchase_percent', 5)}% به حساب شما واریز می‌شود\n\n"
-    text += f"📊 **آمار شما:**\n"
-    text += f"👥 تعداد دعوت‌ها: {stats['signups']}\n"
-    text += f"💰 درآمد از رفرال: {stats['earnings']:,} تومان\n"
-    
-    keyboard = [
-        [InlineKeyboardButton("📋 لینک دعوت من", callback_data="my_referral_link")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_main")]
-    ]
-    await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    try:
+        query = update.callback_query
+        await query.answer()
+        user_id = query.from_user.id
+        
+        user = db.get_user(user_id)
+        if not user.get('referral_code'):
+            db.generate_unique_referral_code(user_id)
+            user = db.get_user(user_id)
+        
+        referral_code = user.get('referral_code')
+        stats = db.get_referral_stats(user_id)
+        settings = db.get_referral_settings()
+        
+        text = f"🔗 **سیستم دعوت از دوستان**\n\n"
+        text += f"لینک دعوت شما:\n`https://t.me/{context.bot.username}?start={referral_code}`\n\n"
+        text += f"🎁 **پاداش‌ها:**\n"
+        text += f"• به ازای هر دوست دعوت شده: {settings.get('signup_bonus_referrer', 0):,} تومان\n"
+        text += f"• دوست شما نیز {settings.get('signup_bonus_referred', 0):,} تومان هدیه می‌گیرد\n"
+        text += f"• از هر خرید دوستتان، {settings.get('purchase_percent', 5)}% به حساب شما واریز می‌شود\n\n"
+        text += f"📊 **آمار شما:**\n"
+        text += f"👥 تعداد دعوت‌ها: {stats['signups']}\n"
+        text += f"💰 درآمد از رفرال: {stats['earnings']:,} تومان\n"
+        
+        keyboard = [
+            [InlineKeyboardButton("📋 لینک دعوت من", callback_data="my_referral_link")],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_main")]
+        ]
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        logger.error(f"Error in referral_menu: {e}")
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text("❌ خطا در نمایش منوی دعوت. لطفاً دوباره تلاش کنید.")
 
 async def my_referral_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """نمایش لینک دعوت به صورت کپی‌شونده"""
@@ -1434,11 +1442,11 @@ async def referral_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYP
     
     keyboard = [
         [InlineKeyboardButton(f"🔘 وضعیت: {status_text}", callback_data="referral_toggle_status")],
-        [InlineKeyboardButton("💰 تغییر پاداش معرف", callback_data="referral_set_bonus_referrer")],
-        [InlineKeyboardButton("🎁 تغییر پاداش معرفی‌شونده", callback_data="referral_set_bonus_referred")],
-        [InlineKeyboardButton("📊 تغییر درصد پورسانت خرید", callback_data="referral_set_purchase_percent")],
-        [InlineKeyboardButton("📅 تنظیم تاریخ شروع جشنواره", callback_data="referral_set_event_start")],
-        [InlineKeyboardButton("📅 تنظیم تاریخ پایان جشنواره", callback_data="referral_set_event_end")],
+        [InlineKeyboardButton("💰 تغییر پاداش معرف", callback_data="ref_set_referrer_bonus")],
+        [InlineKeyboardButton("🎁 تغییر پاداش معرفی‌شونده", callback_data="ref_set_referred_bonus")],
+        [InlineKeyboardButton("📊 تغییر درصد پورسانت خرید", callback_data="ref_set_percent")],
+        [InlineKeyboardButton("📅 تنظیم تاریخ شروع جشنواره", callback_data="ref_set_event_start")],
+        [InlineKeyboardButton("📅 تنظیم تاریخ پایان جشنواره", callback_data="ref_set_event_end")],
         [InlineKeyboardButton("🔄 بازنشانی آمار رفرال", callback_data="referral_reset_stats")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel")]
     ]
@@ -1496,7 +1504,7 @@ async def referral_set_bonus_referrer_get(update: Update, context: ContextTypes.
     # ارسال یک پیام واحد با دکمه بازگشت
     keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="referral_admin_panel")]]
     await update.message.reply_text(
-        f"✅ پاداش معرف به {amount:,} تومان تغییر کرد.\n\nبرای بازگشت روی دکمه کلیک کنید.",
+        f"✅ پاداش معرف به {amount:,} تومان تغییر کرد.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return ConversationHandler.END
@@ -1528,7 +1536,7 @@ async def referral_set_bonus_referred_get(update: Update, context: ContextTypes.
     
     keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="referral_admin_panel")]]
     await update.message.reply_text(
-        f"✅ پاداش معرفی‌شونده به {amount:,} تومان تغییر کرد.\n\nبرای بازگشت روی دکمه کلیک کنید.",
+        f"✅ پاداش معرفی‌شونده به {amount:,} تومان تغییر کرد.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return ConversationHandler.END
@@ -1560,7 +1568,7 @@ async def referral_set_purchase_percent_get(update: Update, context: ContextType
     
     keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="referral_admin_panel")]]
     await update.message.reply_text(
-        f"✅ درصد پورسانت خرید به {percent}% تغییر کرد.\n\nبرای بازگشت روی دکمه کلیک کنید.",
+        f"✅ درصد پورسانت خرید به {percent}% تغییر کرد.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return ConversationHandler.END
@@ -1640,6 +1648,104 @@ async def referral_reset_stats(update: Update, context: ContextTypes.DEFAULT_TYP
     db.reset_referral_stats()
     await query.edit_message_text("✅ آمار رفرال تمام کاربران با موفقیت بازنشانی شد.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="referral_admin_panel")]]))
 
+
+
+# ==================== REFERRAL SETTINGS HELPERS ====================
+
+async def ref_wait_for_input(update: Update, context: ContextTypes.DEFAULT_TYPE, setting_type: str, prompt: str):
+    """تنظیم وضعیت انتظار برای دریافت ورودی از کاربر"""
+    query = update.callback_query
+    await query.answer()
+    context.user_data['ref_setting_type'] = setting_type
+    keyboard = [[InlineKeyboardButton("🔙 انصراف", callback_data="referral_admin_panel")]]
+    await query.edit_message_text(prompt, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def ref_set_referrer_bonus(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await ref_wait_for_input(update, context, 'referrer_bonus', 
+        "💰 **تغییر پاداش معرف**\n\nلطفاً مبلغ جدید را به تومان وارد کنید (عدد صحیح):\nمثال: `5000`")
+
+async def ref_set_referred_bonus(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await ref_wait_for_input(update, context, 'referred_bonus',
+        "🎁 **تغییر پاداش معرفی‌شونده**\n\nلطفاً مبلغ جدید را به تومان وارد کنید (عدد صحیح):\nمثال: `2000`")
+
+async def ref_set_percent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await ref_wait_for_input(update, context, 'purchase_percent',
+        "📊 **تغییر درصد پورسانت خرید**\n\nلطفاً درصد جدید (عدد بین 0 تا 100) را وارد کنید:\nمثال: `5`")
+
+async def ref_set_event_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await ref_wait_for_input(update, context, 'event_start',
+        "📅 **تنظیم تاریخ شروع جشنواره**\n\nلطفاً تاریخ را به فرمت `YYYY-MM-DD HH:MM:SS` وارد کنید.\n"
+        "مثال: `2025-01-01 00:00:00`\n\nبرای حذف محدودیت، عبارت `none` را وارد کنید.")
+
+async def ref_set_event_end(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await ref_wait_for_input(update, context, 'event_end',
+        "📅 **تنظیم تاریخ پایان جشنواره**\n\nلطفاً تاریخ را به فرمت `YYYY-MM-DD HH:MM:SS` وارد کنید.\n"
+        "مثال: `2025-01-01 00:00:00`\n\nبرای حذف محدودیت، عبارت `none` را وارد کنید.")
+
+
+async def handle_ref_setting_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """هندلر عمومی برای دریافت ورودی تنظیمات رفرال"""
+    setting_type = context.user_data.get('ref_setting_type')
+    if not setting_type:
+        return  # در حالت انتظار نیستیم
+    
+    text = update.message.text.strip()
+    success = False
+    reply_text = ""
+    
+    try:
+        if setting_type == 'referrer_bonus':
+            amount = int(text)
+            if amount < 0: raise ValueError
+            db.update_referral_settings(signup_bonus_referrer=amount)
+            reply_text = f"✅ پاداش معرف به {amount:,} تومان تغییر کرد."
+            success = True
+        
+        elif setting_type == 'referred_bonus':
+            amount = int(text)
+            if amount < 0: raise ValueError
+            db.update_referral_settings(signup_bonus_referred=amount)
+            reply_text = f"✅ پاداش معرفی‌شونده به {amount:,} تومان تغییر کرد."
+            success = True
+        
+        elif setting_type == 'purchase_percent':
+            percent = int(text)
+            if percent < 0 or percent > 100: raise ValueError
+            db.update_referral_settings(purchase_percent=percent)
+            reply_text = f"✅ درصد پورسانت خرید به {percent}% تغییر کرد."
+            success = True
+        
+        elif setting_type == 'event_start':
+            if text.lower() == 'none':
+                db.update_referral_settings(event_start_date=None)
+                reply_text = "✅ محدودیت تاریخ شروع برداشته شد."
+                success = True
+            else:
+                datetime.strptime(text, '%Y-%m-%d %H:%M:%S')
+                db.update_referral_settings(event_start_date=text)
+                reply_text = f"✅ تاریخ شروع به {text} تنظیم شد."
+                success = True
+        
+        elif setting_type == 'event_end':
+            if text.lower() == 'none':
+                db.update_referral_settings(event_end_date=None)
+                reply_text = "✅ محدودیت تاریخ پایان برداشته شد."
+                success = True
+            else:
+                datetime.strptime(text, '%Y-%m-%d %H:%M:%S')
+                db.update_referral_settings(event_end_date=text)
+                reply_text = f"✅ تاریخ پایان به {text} تنظیم شد."
+                success = True
+        
+    except ValueError:
+        await update.message.reply_text("❌ مقدار نامعتبر. لطفاً دوباره تلاش کنید یا /cancel")
+        return
+    
+    if success:
+        # پاک کردن وضعیت انتظار
+        context.user_data.pop('ref_setting_type', None)
+        keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="referral_admin_panel")]]
+        await update.message.reply_text(reply_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 # ==================== MAIN ====================
 
@@ -1733,42 +1839,7 @@ def main():
     )
 
 
-        # referral setting conversations
-    referral_bonus_referrer_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(referral_set_bonus_referrer_start, pattern="^referral_set_bonus_referrer$")],
-        states={ASK_REFERRAL_BONUS_REFERRER: [MessageHandler(filters.TEXT & ~filters.COMMAND, referral_set_bonus_referrer_get)]},
-        fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True,
-        per_message=True
-    )
-    referral_bonus_referred_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(referral_set_bonus_referred_start, pattern="^referral_set_bonus_referred$")],
-        states={ASK_REFERRAL_BONUS_REFERRED: [MessageHandler(filters.TEXT & ~filters.COMMAND, referral_set_bonus_referred_get)]},
-        fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True,
-        per_message=True
-    )
-    referral_percent_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(referral_set_purchase_percent_start, pattern="^referral_set_purchase_percent$")],
-        states={ASK_REFERRAL_PURCHASE_PERCENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, referral_set_purchase_percent_get)]},
-        fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True,
-        per_message=True
-    )
-    referral_event_start_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(referral_set_event_start_start, pattern="^referral_set_event_start$")],
-        states={ASK_REFERRAL_EVENT_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, referral_set_event_start_get)]},
-        fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True,
-        per_message=True
-    )
-    referral_event_end_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(referral_set_event_end_start, pattern="^referral_set_event_end$")],
-        states={ASK_REFERRAL_EVENT_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, referral_set_event_end_get)]},
-        fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True,
-        per_message=True
-    )
+    
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("delete_plan", delete_plan_command))
@@ -1819,16 +1890,20 @@ def main():
     app.add_handler(CallbackQueryHandler(approve_payment, pattern="^approve_payment_\\d+$"))
 
     #Refferal-handlers
-    app.add_handler(referral_bonus_referrer_conv)
-    app.add_handler(referral_bonus_referred_conv)
-    app.add_handler(referral_percent_conv)
-    app.add_handler(referral_event_start_conv)
-    app.add_handler(referral_event_end_conv)
+    app.add_handler(CallbackQueryHandler(ref_set_referrer_bonus, pattern="^ref_set_referrer_bonus$"))
+    app.add_handler(CallbackQueryHandler(ref_set_referred_bonus, pattern="^ref_set_referred_bonus$"))
+    app.add_handler(CallbackQueryHandler(ref_set_percent, pattern="^ref_set_percent$"))
+    app.add_handler(CallbackQueryHandler(ref_set_event_start, pattern="^ref_set_event_start$"))
+    app.add_handler(CallbackQueryHandler(ref_set_event_end, pattern="^ref_set_event_end$"))
+
     app.add_handler(CallbackQueryHandler(referral_admin_panel, pattern="^referral_admin_panel$"))
     app.add_handler(CallbackQueryHandler(referral_toggle_status, pattern="^referral_toggle_status$"))
     app.add_handler(CallbackQueryHandler(referral_reset_stats, pattern="^referral_reset_stats$"))
     app.add_handler(CallbackQueryHandler(referral_menu, pattern="^referral_menu$"))
     app.add_handler(CallbackQueryHandler(my_referral_link, pattern="^my_referral_link$"))
+
+        # هندلر عمومی برای ورودی تنظیمات رفرال (عدد و تاریخ)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ref_setting_input), group=1)
     
     app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_receipt))
     
