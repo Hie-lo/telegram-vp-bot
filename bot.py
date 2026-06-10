@@ -93,7 +93,8 @@ def get_admin_panel_keyboard(owner: bool = False):
         keyboard.insert(8, [InlineKeyboardButton("📦 بک‌آپ دستی", callback_data="manual_backup")])
         keyboard.insert(8, [InlineKeyboardButton("📊 گزارش رفرال", callback_data="export_referral_report")])
         keyboard.insert(9, [InlineKeyboardButton("📊 حسابداری", callback_data="accounting_report")])
-    keyboard.append([InlineKeyboardButton("📢 پیام همگانی", callback_data="broadcast_menu")])
+
+    keyboard.append([InlineKeyboardButton("📢 پیام همگانی", callback_data="broadcast_start")])
     keyboard.append([InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main")])
     return InlineKeyboardMarkup(keyboard)
 
@@ -1938,21 +1939,18 @@ async def export_users_excel(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ==================== BROADCAST SYSTEM (ADMINS + OWNER) ====================
 
-async def broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """نمایش منوی ارسال پیام همگانی (فقط ادمین‌ها)"""
+async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """شروع فرآیند ارسال پیام همگانی (بدون انتخاب نوع)"""
     query = update.callback_query
     await query.answer()
     if not is_admin(query.from_user.id):
         await query.edit_message_text("❌ دسترسی غیرمجاز", reply_markup=get_back_button())
         return
     
+    # بررسی محدودیت‌ها برای ادمین‌های معمولی
     settings = db.get_broadcast_settings()
     admin_id = query.from_user.id
-    is_owner_flag = is_owner(admin_id)
-    
-    # بررسی محدودیت‌ها برای ادمین معمولی
-    if not is_owner_flag:
-        # تعداد امروز
+    if not is_owner(admin_id):
         today_count = db.get_admin_broadcast_today_count(admin_id)
         if today_count >= settings['daily_limit']:
             await query.edit_message_text(
@@ -1960,7 +1958,6 @@ async def broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=get_back_button()
             )
             return
-        # cooldown
         last_time = db.get_last_broadcast_time(admin_id)
         if last_time:
             cooldown_seconds = settings['cooldown_minutes'] * 60
@@ -1973,50 +1970,66 @@ async def broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
     
-    keyboard = [
-        [InlineKeyboardButton("📝 ارسال متن", callback_data="broadcast_type_text")],
-        [InlineKeyboardButton("🖼 ارسال عکس", callback_data="broadcast_type_photo")],
-        [InlineKeyboardButton("🎥 ارسال ویدئو", callback_data="broadcast_type_video")],
-        [InlineKeyboardButton("📎 ارسال فایل", callback_data="broadcast_type_document")],
-        [InlineKeyboardButton("🎤 ارسال ویس", callback_data="broadcast_type_voice")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel")]
-    ]
+    # پاک کردن اطلاعات قبلی (در صورت وجود)
+    context.user_data.pop('broadcast_type', None)
+    context.user_data.pop('broadcast_content', None)
+    context.user_data.pop('broadcast_caption', None)
+    
     await query.edit_message_text(
-        "📢 **ارسال پیام همگانی**\n\nنوع پیام مورد نظر را انتخاب کنید:",
+        "📢 **ارسال پیام همگانی**\n\n"
+        "لطفاً پیام خود را ارسال کنید (متن، عکس، ویدئو، فایل یا ویس).\n"
+        "ربات به طور خودکار نوع پیام را تشخیص می‌دهد.\n\n"
+        "برای لغو، دستور /cancel را بزنید.",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="admin_panel")]])
+    )
+    return ASK_BROADCAST_CONTENT
+
+async def broadcast_get_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت محتوا و تشخیص خودکار نوع پیام"""
+    # تشخیص نوع پیام
+    if update.message.text:
+        msg_type = 'text'
+        content = update.message.text
+        caption = None
+    elif update.message.photo:
+        msg_type = 'photo'
+        content = update.message.photo[-1].file_id
+        caption = update.message.caption
+    elif update.message.video:
+        msg_type = 'video'
+        content = update.message.video.file_id
+        caption = update.message.caption
+    elif update.message.document:
+        msg_type = 'document'
+        content = update.message.document.file_id
+        caption = update.message.caption
+    elif update.message.voice:
+        msg_type = 'voice'
+        content = update.message.voice.file_id
+        caption = None
+    else:
+        await update.message.reply_text("❌ نوع پیام پشتیبانی نمی‌شود. لطفاً متن، عکس، ویدئو، فایل یا ویس ارسال کنید.")
+        return ASK_BROADCAST_CONTENT
+    
+    context.user_data['broadcast_type'] = msg_type
+    context.user_data['broadcast_content'] = content
+    context.user_data['broadcast_caption'] = caption
+    
+    # نمایش کیبورد انتخاب فیلتر
+    keyboard = [
+        [InlineKeyboardButton("👥 همه کاربران", callback_data="broadcast_filter_all")],
+        [InlineKeyboardButton("🎁 کاربران تست‌دهنده", callback_data="broadcast_filter_tested")],
+        [InlineKeyboardButton("🛒 کاربران خریدار", callback_data="broadcast_filter_buyers")],
+        [InlineKeyboardButton("📆 کاربران فعال (۷ روز اخیر)", callback_data="broadcast_filter_active_7d")],
+        [InlineKeyboardButton("🔙 انصراف", callback_data="admin_panel")]
+    ]
+    await update.message.reply_text(
+        "📊 **انتخاب مخاطبان**\n\nلطفاً گروه هدف خود را انتخاب کنید:",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    return
-
-# ---------- انتخاب نوع پیام ----------
-async def broadcast_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    msg_type = query.data.split('_')[2]  # text, photo, video, document, voice
-    context.user_data['broadcast_type'] = msg_type
-    context.user_data['broadcast_caption'] = None
-    
-    if msg_type == 'text':
-        await query.edit_message_text(
-            "✏️ **ارسال متن همگانی**\n\nمتن خود را ارسال کنید:",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="broadcast_menu")]])
-        )
-        return ASK_BROADCAST_CONTENT
-    else:
-        # برای عکس، ویدئو، فایل، ویس
-        prompt = {
-            'photo': '🖼 **ارسال عکس همگانی**\n\nلطفاً عکس را ارسال کنید.\nبعد از عکس می‌توانید کپشن (اختیاری) نیز بفرستید.',
-            'video': '🎥 **ارسال ویدئو همگانی**\n\nلطفاً ویدئو را ارسال کنید.\nبعد از ویدئو می‌توانید کپشن (اختیاری) نیز بفرستید.',
-            'document': '📎 **ارسال فایل همگانی**\n\nلطفاً فایل را ارسال کنید.\nبعد از فایل می‌توانید کپشن (اختیاری) نیز بفرستید.',
-            'voice': '🎤 **ارسال ویس همگانی**\n\nلطفاً ویس را ارسال کنید.\n(ویس کپشن ندارد)'
-        }
-        await query.edit_message_text(
-            prompt.get(msg_type, 'لطفاً محتوا را ارسال کنید.'),
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="broadcast_menu")]])
-        )
-        return ASK_BROADCAST_CONTENT
+    return ASK_BROADCAST_FILTER
 
 # ---------- دریافت محتوا (متن یا فایل) ----------
 
@@ -2249,9 +2262,9 @@ def main():
     )
         # conversation: broadcast
     broadcast_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(broadcast_type_handler, pattern="^broadcast_type_")],
+        entry_points=[CallbackQueryHandler(broadcast_start, pattern="^broadcast_start$")],
         states={
-            ASK_BROADCAST_CONTENT: [MessageHandler(filters.TEXT | filters.ATTACHMENT, broadcast_get_content)],  
+            ASK_BROADCAST_CONTENT: [MessageHandler(filters.ALL, broadcast_get_content)],
             ASK_BROADCAST_FILTER: [CallbackQueryHandler(broadcast_filter_handler, pattern="^broadcast_filter_")],
             ASK_BROADCAST_CONFIRM: [CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm_yes$")],
         },
@@ -2259,10 +2272,8 @@ def main():
         allow_reentry=True,
         per_message=True
     )
-
-
+    
     app.add_handler(broadcast_conv)
-    app.add_handler(CallbackQueryHandler(broadcast_menu, pattern="^broadcast_menu$"))
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("delete_plan", delete_plan_command))
