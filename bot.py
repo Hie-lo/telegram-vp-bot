@@ -81,8 +81,9 @@ def get_admin_panel_keyboard(owner: bool = False):
         keyboard.insert(4, [InlineKeyboardButton("📈 آمار پیشرفته", callback_data="advanced_stats")])
         keyboard.insert(2, [InlineKeyboardButton("👑 مدیریت ادمین‌ها", callback_data="admin_manage_admins")])  
         keyboard.insert(5, [InlineKeyboardButton("🔄 ری‌استارت ربات", callback_data="restart_bot")])
-        keyboard.insert(6, [InlineKeyboardButton("⚙️ تنظیمات پیام تست", callback_data="test_reminder_settings")]),keyboard.insert(6, [InlineKeyboardButton("🎁 تنظیمات رفرال", callback_data="referral_admin_panel")])
-        keyboard.insert(7, [InlineKeyboardButton("📦 بک‌آپ دستی", callback_data="manual_backup")])
+        keyboard.insert(6, [InlineKeyboardButton("⚙️ تنظیمات پیام تست", callback_data="test_reminder_settings")]) 
+        keyboard.insert(7, [InlineKeyboardButton("🎁 تنظیمات رفرال", callback_data="referral_admin_panel")])
+        keyboard.insert(8, [InlineKeyboardButton("📦 بک‌آپ دستی", callback_data="manual_backup")])
     keyboard.append([InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main")])
     return InlineKeyboardMarkup(keyboard)
 
@@ -1644,31 +1645,36 @@ def main():
             ASK_PLAN_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_plan_get_price)],
         },
         fallbacks=[CommandHandler("cancel", add_plan_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     charge_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_charge_by_id_start, pattern="^charge_by_id$"), CallbackQueryHandler(admin_charge_by_username_start, pattern="^charge_by_username$")],
         states={ASK_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, manual_charge_get_user)], ASK_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_charge_get_amount)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     test_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_test_by_id_start, pattern="^admin_test_by_id$"), CallbackQueryHandler(admin_test_by_username_start, pattern="^admin_test_by_username$")],
         states={ASK_TEST_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_test_get_user)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     payment_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(rial_payment_start, pattern="^rial_payment$")],
         states={ASK_PAYMENT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, rial_payment_get_amount)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     reject_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(reject_payment, pattern="^reject_payment_\\d+$")],
         states={ASK_REJECT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_reject_reason), CallbackQueryHandler(cancel_reject_callback, pattern="^cancel_reject$")]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     debit_conv = ConversationHandler(
         entry_points=[
@@ -1680,19 +1686,22 @@ def main():
             ASK_DEBIT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, debit_get_amount)]
         },
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     add_admin_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_admin_start, pattern="^add_admin$")],
         states={ASK_ADMIN_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_admin_get_user)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     remove_admin_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(remove_admin_start, pattern="^remove_admin$")],
         states={ASK_REMOVE_ADMIN_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_admin_get_user)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
         # conversation: edit test reminder text
     edit_reminder_text_conv = ConversationHandler(
@@ -1715,31 +1724,36 @@ def main():
         entry_points=[CallbackQueryHandler(referral_set_bonus_referrer_start, pattern="^referral_set_bonus_referrer$")],
         states={ASK_REFERRAL_BONUS_REFERRER: [MessageHandler(filters.TEXT & ~filters.COMMAND, referral_set_bonus_referrer_get)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     referral_bonus_referred_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(referral_set_bonus_referred_start, pattern="^referral_set_bonus_referred$")],
         states={ASK_REFERRAL_BONUS_REFERRED: [MessageHandler(filters.TEXT & ~filters.COMMAND, referral_set_bonus_referred_get)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     referral_percent_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(referral_set_purchase_percent_start, pattern="^referral_set_purchase_percent$")],
         states={ASK_REFERRAL_PURCHASE_PERCENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, referral_set_purchase_percent_get)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     referral_event_start_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(referral_set_event_start_start, pattern="^referral_set_event_start$")],
         states={ASK_REFERRAL_EVENT_START: [MessageHandler(filters.TEXT & ~filters.COMMAND, referral_set_event_start_get)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
     referral_event_end_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(referral_set_event_end_start, pattern="^referral_set_event_end$")],
         states={ASK_REFERRAL_EVENT_END: [MessageHandler(filters.TEXT & ~filters.COMMAND, referral_set_event_end_get)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=True
     )
 
     app.add_handler(CommandHandler("start", start))
@@ -1805,9 +1819,8 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_receipt))
     
         # راه‌اندازی JobQueue برای یادآوری تست
-    job_queue = app.job_queue
-    if job_queue:
-        job_queue.run_repeating(check_test_reminders, interval=60, first=10)
+    if app.job_queue:
+        app.job_queue.run_repeating(check_test_reminders, interval=60, first=10)
     else:
         logger.warning("JobQueue not available! Test reminders will not work.")
 
