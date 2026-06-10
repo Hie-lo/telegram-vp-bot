@@ -7,24 +7,26 @@ def delete_user(user_id: int):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # حذف رکوردهای وابسته
-    tables = [
-        'referral_logs',   # ستون referrer_id و referred_id
-        'payment_requests', # ستون user_id
-        'test_requests',    # ستون user_id
-        'orders',           # ستون user_id
-        'transactions',     # ستون user_id
-        'admins',           # ستون user_id
-        'payment_logs'      # ستون user_id و admin_id
-    ]
-    for table in tables:
-        # حذف رکوردهایی که user_id دارند
-        cursor.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
-        # اگر جدول ستون referrer_id دارد (فقط referral_logs)
-        if table == 'referral_logs':
-            cursor.execute(f"DELETE FROM {table} WHERE referrer_id = ?", (user_id,))
+    # جداول و ستون‌های مرتبط با user_id
+    tables_columns = {
+        'payment_requests': ['user_id'],
+        'test_requests': ['user_id'],
+        'orders': ['user_id'],
+        'transactions': ['user_id'],
+        'admins': ['user_id'],
+        'payment_logs': ['user_id', 'admin_id'],
+        'referral_logs': ['referrer_id', 'referred_id']
+    }
     
-    # حذف خود کاربر
+    for table, columns in tables_columns.items():
+        for col in columns:
+            try:
+                cursor.execute(f"DELETE FROM {table} WHERE {col} = ?", (user_id,))
+            except sqlite3.OperationalError:
+                # اگر ستون وجود نداشت، نادیده بگیر
+                pass
+    
+    # حذف خود کاربر از جدول اصلی
     cursor.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
     
     conn.commit()
