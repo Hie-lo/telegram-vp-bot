@@ -11,7 +11,7 @@ import database as db
 from pasarguard_api import PasarGuardAPI
 import subprocess
 import sys
-
+import asyncio
 # Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -32,6 +32,7 @@ ASK_ADMIN_USER_ID = 18
 ASK_REMOVE_ADMIN_USER_ID = 19
 ASK_TEST_REMINDER_TEXT = 20
 ASK_PRE_EXPIRE_MINUTES = 21
+
 ASK_REFERRAL_SETTING_TYPE = 22
 ASK_REFERRAL_BONUS_REFERRER = 23
 ASK_REFERRAL_BONUS_REFERRED = 24
@@ -39,6 +40,11 @@ ASK_REFERRAL_PURCHASE_PERCENT = 25
 ASK_REFERRAL_EVENT_START = 26
 ASK_REFERRAL_EVENT_END = 27
 
+ASK_BROADCAST_TYPE = 30
+ASK_BROADCAST_CONTENT = 31
+ASK_BROADCAST_CAPTION = 32
+ASK_BROADCAST_FILTER = 33
+ASK_BROADCAST_CONFIRM = 34
 # Helper functions for permissions
 def is_admin(user_id: int) -> bool:
     return db.is_admin(user_id)
@@ -87,6 +93,7 @@ def get_admin_panel_keyboard(owner: bool = False):
         keyboard.insert(8, [InlineKeyboardButton("📦 بک‌آپ دستی", callback_data="manual_backup")])
         keyboard.insert(8, [InlineKeyboardButton("📊 گزارش رفرال", callback_data="export_referral_report")])
         keyboard.insert(9, [InlineKeyboardButton("📊 حسابداری", callback_data="accounting_report")])
+    keyboard.append([InlineKeyboardButton("📢 پیام همگانی", callback_data="broadcast_menu")])
     keyboard.append([InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main")])
     return InlineKeyboardMarkup(keyboard)
 
@@ -1929,6 +1936,235 @@ async def export_users_excel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # بازگشت به لیست کاربران (با حفظ صفحه جاری)
     await admin_list_users(update, context)
 
+# ==================== BROADCAST SYSTEM (ADMINS + OWNER) ====================
+
+async def broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """نمایش منوی ارسال پیام همگانی (فقط ادمین‌ها)"""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(query.from_user.id):
+        await query.edit_message_text("❌ دسترسی غیرمجاز", reply_markup=get_back_button())
+        return
+    
+    settings = db.get_broadcast_settings()
+    admin_id = query.from_user.id
+    is_owner_flag = is_owner(admin_id)
+    
+    # بررسی محدودیت‌ها برای ادمین معمولی
+    if not is_owner_flag:
+        # تعداد امروز
+        today_count = db.get_admin_broadcast_today_count(admin_id)
+        if today_count >= settings['daily_limit']:
+            await query.edit_message_text(
+                f"❌ شما امروز {today_count} بار از سقف مجاز ({settings['daily_limit']}) استفاده کرده‌اید.\nلطفاً فردا تلاش کنید.",
+                reply_markup=get_back_button()
+            )
+            return
+        # cooldown
+        last_time = db.get_last_broadcast_time(admin_id)
+        if last_time:
+            cooldown_seconds = settings['cooldown_minutes'] * 60
+            elapsed = (datetime.now() - last_time).total_seconds()
+            if elapsed < cooldown_seconds:
+                remaining = int(cooldown_seconds - elapsed)
+                await query.edit_message_text(
+                    f"❌ لطفاً {remaining} ثانیه صبر کنید تا دوباره بتوانید پیام همگانی بفرستید.",
+                    reply_markup=get_back_button()
+                )
+                return
+    
+    keyboard = [
+        [InlineKeyboardButton("📝 ارسال متن", callback_data="broadcast_type_text")],
+        [InlineKeyboardButton("🖼 ارسال عکس", callback_data="broadcast_type_photo")],
+        [InlineKeyboardButton("🎥 ارسال ویدئو", callback_data="broadcast_type_video")],
+        [InlineKeyboardButton("📎 ارسال فایل", callback_data="broadcast_type_document")],
+        [InlineKeyboardButton("🎤 ارسال ویس", callback_data="broadcast_type_voice")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel")]
+    ]
+    await query.edit_message_text(
+        "📢 **ارسال پیام همگانی**\n\nنوع پیام مورد نظر را انتخاب کنید:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return
+
+# ---------- انتخاب نوع پیام ----------
+async def broadcast_type_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    msg_type = query.data.split('_')[2]  # text, photo, video, document, voice
+    context.user_data['broadcast_type'] = msg_type
+    context.user_data['broadcast_caption'] = None
+    
+    if msg_type == 'text':
+        await query.edit_message_text(
+            "✏️ **ارسال متن همگانی**\n\nمتن خود را ارسال کنید:",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="broadcast_menu")]])
+        )
+        return ASK_BROADCAST_CONTENT
+    else:
+        # برای عکس، ویدئو، فایل، ویس
+        prompt = {
+            'photo': '🖼 **ارسال عکس همگانی**\n\nلطفاً عکس را ارسال کنید.\nبعد از عکس می‌توانید کپشن (اختیاری) نیز بفرستید.',
+            'video': '🎥 **ارسال ویدئو همگانی**\n\nلطفاً ویدئو را ارسال کنید.\nبعد از ویدئو می‌توانید کپشن (اختیاری) نیز بفرستید.',
+            'document': '📎 **ارسال فایل همگانی**\n\nلطفاً فایل را ارسال کنید.\nبعد از فایل می‌توانید کپشن (اختیاری) نیز بفرستید.',
+            'voice': '🎤 **ارسال ویس همگانی**\n\nلطفاً ویس را ارسال کنید.\n(ویس کپشن ندارد)'
+        }
+        await query.edit_message_text(
+            prompt.get(msg_type, 'لطفاً محتوا را ارسال کنید.'),
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="broadcast_menu")]])
+        )
+        return ASK_BROADCAST_CONTENT
+
+# ---------- دریافت محتوا (متن یا فایل) ----------
+async def broadcast_get_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg_type = context.user_data.get('broadcast_type')
+    if msg_type == 'text':
+        text = update.message.text
+        if not text:
+            await update.message.reply_text("❌ متن نمی‌تواند خالی باشد. دوباره ارسال کنید.")
+            return ASK_BROADCAST_CONTENT
+        context.user_data['broadcast_content'] = text
+        context.user_data['broadcast_caption'] = None
+        await ask_broadcast_filter(update, context)
+        return ConversationHandler.END
+    else:
+        # دریافت فایل
+        file_id = None
+        if msg_type == 'photo' and update.message.photo:
+            file_id = update.message.photo[-1].file_id
+        elif msg_type == 'video' and update.message.video:
+            file_id = update.message.video.file_id
+        elif msg_type == 'document' and update.message.document:
+            file_id = update.message.document.file_id
+        elif msg_type == 'voice' and update.message.voice:
+            file_id = update.message.voice.file_id
+        else:
+            await update.message.reply_text("❌ نوع فایل ارسالی با نوع انتخابی همخوانی ندارد. دوباره تلاش کنید.")
+            return ASK_BROADCAST_CONTENT
+        
+        context.user_data['broadcast_content'] = file_id
+        # اگر کپشن وجود داشت، ذخیره کن (برای voice کپشن نداریم)
+        if msg_type != 'voice' and update.message.caption:
+            context.user_data['broadcast_caption'] = update.message.caption
+        else:
+            context.user_data['broadcast_caption'] = None
+        
+        await ask_broadcast_filter(update, context)
+        return ConversationHandler.END
+
+async def ask_broadcast_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """نمایش گزینه‌های فیلتر مخاطبان"""
+    keyboard = [
+        [InlineKeyboardButton("👥 همه کاربران", callback_data="broadcast_filter_all")],
+        [InlineKeyboardButton("🎁 کاربران تست‌دهنده", callback_data="broadcast_filter_tested")],
+        [InlineKeyboardButton("🛒 کاربران خریدار", callback_data="broadcast_filter_buyers")],
+        [InlineKeyboardButton("📆 کاربران فعال (۷ روز اخیر)", callback_data="broadcast_filter_active_7d")],
+        [InlineKeyboardButton("🔙 انصراف", callback_data="broadcast_menu")]
+    ]
+    await update.message.reply_text(
+        "📊 **انتخاب مخاطبان**\n\nلطفاً گروه هدف خود را انتخاب کنید:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return ASK_BROADCAST_FILTER
+
+async def broadcast_filter_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    filter_type = query.data.split('_')[2]  # all, tested, buyers, active_7d
+    context.user_data['broadcast_filter'] = filter_type
+    
+    target_count = db.get_target_users_count(filter_type)
+    if target_count == 0:
+        await query.edit_message_text("❌ هیچ کاربری در این گروه وجود ندارد.\nلطفاً گروه دیگری را انتخاب کنید.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="broadcast_menu")]]))
+        return
+    
+    context.user_data['broadcast_target_count'] = target_count
+    keyboard = [
+        [InlineKeyboardButton("✅ بله، ارسال شود", callback_data="broadcast_confirm_yes")],
+        [InlineKeyboardButton("❌ خیر، لغو", callback_data="broadcast_menu")]
+    ]
+    await query.edit_message_text(
+        f"📢 **تأیید نهایی**\n\n"
+        f"نوع پیام: {context.user_data['broadcast_type']}\n"
+        f"تعداد گیرندگان: {target_count} نفر\n\n"
+        f"آیا برای ارسال اطمینان دارید؟",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return ASK_BROADCAST_CONFIRM
+
+async def broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    admin_id = query.from_user.id
+    admin_username = query.from_user.username
+    msg_type = context.user_data['broadcast_type']
+    content = context.user_data['broadcast_content']
+    caption = context.user_data.get('broadcast_caption')
+    target_filter = context.user_data['broadcast_filter']
+    target_count = context.user_data['broadcast_target_count']
+    
+    # ثبت لاگ
+    broadcast_id = db.log_broadcast(admin_id, admin_username, msg_type, content, caption, target_filter)
+    
+    # شروع ارسال در پس‌زمینه (برای جلوگیری از timeout)
+    context.application.create_task(
+        send_broadcast_messages(context.application, broadcast_id, admin_id, msg_type, content, caption, target_filter, target_count, query.message.chat_id)
+    )
+    
+    await query.edit_message_text(
+        f"⏳ ارسال پیام همگانی به {target_count} کاربر آغاز شد.\n"
+        f"شما پس از اتمام، نتیجه را دریافت خواهید کرد.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="admin_panel")]])
+    )
+    return ConversationHandler.END
+
+async def send_broadcast_messages(app, broadcast_id, admin_id, msg_type, content, caption, target_filter, target_count, report_chat_id):
+    """ارسال تدریجی پیام‌ها با تأخیر (برای جلوگیری از محدودیت)"""
+    success = 0
+    failed = 0
+    users = db.get_target_users(target_filter)
+    total = len(users)
+    
+    for idx, user_id in enumerate(users, 1):
+        try:
+            if msg_type == 'text':
+                await app.bot.send_message(chat_id=user_id, text=content, parse_mode='Markdown')
+            elif msg_type == 'photo':
+                await app.bot.send_photo(chat_id=user_id, photo=content, caption=caption, parse_mode='Markdown')
+            elif msg_type == 'video':
+                await app.bot.send_video(chat_id=user_id, video=content, caption=caption, parse_mode='Markdown')
+            elif msg_type == 'document':
+                await app.bot.send_document(chat_id=user_id, document=content, caption=caption, parse_mode='Markdown')
+            elif msg_type == 'voice':
+                await app.bot.send_voice(chat_id=user_id, voice=content)
+            success += 1
+        except Exception as e:
+            logger.error(f"Broadcast failed for user {user_id}: {e}")
+            failed += 1
+        
+        # تأخیر 0.5 ثانیه بین هر پیام برای جلوگیری از محدودیت
+        if idx % 20 == 0:
+            await asyncio.sleep(1)
+        else:
+            await asyncio.sleep(0.3)
+    
+    db.update_broadcast_stats(broadcast_id, total, success, failed, 'completed')
+    await app.bot.send_message(
+        chat_id=report_chat_id,
+        text=f"✅ **ارسال پیام همگانی پایان یافت.**\n\n"
+             f"👥 تعداد کل: {total}\n"
+             f"✅ موفق: {success}\n"
+             f"❌ ناموفق: {failed}\n"
+             f"🆔 شماره درخواست: {broadcast_id}",
+        parse_mode='Markdown'
+    )
+
+
 # ==================== MAIN ====================
 
 def main():
@@ -2019,9 +2255,22 @@ def main():
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True
     )
+        # conversation: broadcast
+    broadcast_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(broadcast_type_handler, pattern="^broadcast_type_")],
+        states={
+            ASK_BROADCAST_CONTENT: [MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO | filters.DOCUMENT | filters.VOICE, broadcast_get_content)],
+            ASK_BROADCAST_FILTER: [CallbackQueryHandler(broadcast_filter_handler, pattern="^broadcast_filter_")],
+            ASK_BROADCAST_CONFIRM: [CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm_yes$")],
+        },
+        fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
+        allow_reentry=True,
+        per_message=True
+    )
 
 
-    
+    app.add_handler(broadcast_conv)
+    app.add_handler(CallbackQueryHandler(broadcast_menu, pattern="^broadcast_menu$"))
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("delete_plan", delete_plan_command))

@@ -167,6 +167,40 @@ def init_db():
         )
     ''')
 
+        # Broadcast settings table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS broadcast_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            daily_limit INTEGER DEFAULT 3,
+            cooldown_minutes INTEGER DEFAULT 5,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Broadcast logs table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS broadcast_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            admin_id INTEGER NOT NULL,
+            admin_username TEXT,
+            message_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            caption TEXT,
+            target_filter TEXT NOT NULL,
+            target_count INTEGER DEFAULT 0,
+            success_count INTEGER DEFAULT 0,
+            failed_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'sending'
+        )
+    ''')
+    
+    # Insert default settings if empty
+    cursor.execute('SELECT COUNT(*) FROM broadcast_settings')
+    if cursor.fetchone()[0] == 0:
+        cursor.execute('INSERT INTO broadcast_settings (daily_limit, cooldown_minutes) VALUES (3, 5)')
+
+
     # Add referral_code and referrer_id to users table (اگر وجود نداشته باشد)
     try:
         cursor.execute('ALTER TABLE users ADD COLUMN referral_code TEXT UNIQUE')
@@ -1334,3 +1368,136 @@ def export_users_to_excel():
     wb.save(temp_file.name)
     temp_file.close()
     return temp_file.name
+
+
+
+
+# ==================== Broadcast Helpers ====================
+
+def get_broadcast_settings() -> Dict:
+    """دریافت تنظیمات برودکست"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT daily_limit, cooldown_minutes FROM broadcast_settings ORDER BY id DESC LIMIT 1')
+    row = cursor.fetchone()
+    conn.close()
+    return {'daily_limit': row[0] if row else 3, 'cooldown_minutes': row[1] if row else 5}
+
+def update_broadcast_settings(daily_limit: int = None, cooldown_minutes: int = None) -> bool:
+    """به‌روزرسانی تنظیمات برودکست"""
+    conn = get_db()
+    cursor = conn.cursor()
+    fields = []
+    values = []
+    if daily_limit is not None:
+        fields.append('daily_limit = ?')
+        values.append(daily_limit)
+    if cooldown_minutes is not None:
+        fields.append('cooldown_minutes = ?')
+        values.append(cooldown_minutes)
+    if not fields:
+        conn.close()
+        return False
+    fields.append('updated_at = CURRENT_TIMESTAMP')
+    query = f'UPDATE broadcast_settings SET {", ".join(fields)} WHERE id = (SELECT id FROM broadcast_settings ORDER BY id DESC LIMIT 1)'
+    cursor.execute(query, values)
+    conn.commit()
+    success = cursor.rowcount > 0
+    conn.close()
+    return success
+
+def log_broadcast(admin_id: int, admin_username: str, message_type: str, content: str, caption: str, target_filter: str) -> int:
+    """ثبت یک درخواست برودکست در لاگ و برگرداندن id آن"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO broadcast_logs (admin_id, admin_username, message_type, content, caption, target_filter, status)
+        VALUES (?, ?, ?, ?, ?, ?, 'sending')
+    ''', (admin_id, admin_username, message_type, content, caption, target_filter))
+    broadcast_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return broadcast_id
+
+def update_broadcast_stats(broadcast_id: int, target_count: int, success_count: int, failed_count: int, status: str = 'completed'):
+    """به‌روزرسانی آمار ارسال برودکست"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE broadcast_logs 
+        SET target_count = ?, success_count = ?, failed_count = ?, status = ?
+        WHERE id = ?
+    ''', (target_count, success_count, failed_count, status, broadcast_id))
+    conn.commit()
+    conn.close()
+
+def get_admin_broadcast_today_count(admin_id: int) -> int:
+    """تعداد برودکست‌های امروز یک ادمین (فقط برای ادمین‌های غیر مالک)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    today = datetime.now().strftime('%Y-%m-%d')
+    cursor.execute('''
+        SELECT COUNT(*) FROM broadcast_logs 
+        WHERE admin_id = ? AND date(created_at) = ?
+    ''', (admin_id, today))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+def get_last_broadcast_time(admin_id: int) -> Optional[datetime]:
+    """زمان آخرین برودکست یک ادمین (برای cooldown)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT created_at FROM broadcast_logs 
+        WHERE admin_id = ? 
+        ORDER BY created_at DESC LIMIT 1
+    ''', (admin_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return datetime.fromisoformat(row[0]) if row else None
+
+def get_target_users_count(target_filter: str) -> int:
+    """دریافت تعداد کاربران بر اساس فیلتر"""
+    conn = get_db()
+    cursor = conn.cursor()
+    now = datetime.now()
+    if target_filter == 'all':
+        cursor.execute('SELECT COUNT(*) FROM users')
+    elif target_filter == 'tested':
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM test_requests')
+    elif target_filter == 'buyers':
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM orders WHERE status = "completed"')
+    elif target_filter == 'active_7d':
+        week_ago = (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM orders WHERE created_at >= ?', (week_ago,))
+    else:
+        cursor.execute('SELECT COUNT(*) FROM users')
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+def get_target_users(target_filter: str, limit: int = None, offset: int = 0):
+    """دریافت لیست کاربران بر اساس فیلتر (برای ارسال تدریجی)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    now = datetime.now()
+    query = ''
+    if target_filter == 'all':
+        query = 'SELECT user_id FROM users ORDER BY user_id'
+    elif target_filter == 'tested':
+        query = 'SELECT DISTINCT user_id FROM test_requests ORDER BY user_id'
+    elif target_filter == 'buyers':
+        query = 'SELECT DISTINCT user_id FROM orders WHERE status = "completed" ORDER BY user_id'
+    elif target_filter == 'active_7d':
+        week_ago = (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+        query = f'SELECT DISTINCT user_id FROM orders WHERE created_at >= "{week_ago}" ORDER BY user_id'
+    else:
+        query = 'SELECT user_id FROM users ORDER BY user_id'
+    
+    if limit:
+        query += f' LIMIT {limit} OFFSET {offset}'
+    cursor.execute(query)
+    users = cursor.fetchall()
+    conn.close()
+    return [u[0] for u in users]
