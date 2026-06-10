@@ -866,62 +866,136 @@ async def edit_pre_expire_minutes_get(update: Update, context: ContextTypes.DEFA
 
 # ==================== ADMIN MAKE TEST ====================
 
+# ==================== ADMIN MAKE TEST (SIMPLE VERSION) ====================
+
 async def admin_make_test_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """نمایش منوی ساخت تست"""
     query = update.callback_query
     await query.answer()
     if not is_admin(query.from_user.id):
         await query.edit_message_text("❌ دسترسی غیرمجاز")
         return
+    
+    context.user_data['awaiting_test_user'] = True
+    
     keyboard = [
-        [InlineKeyboardButton("🆔 ساخت تست با آیدی عددی", callback_data="admin_test_by_id")],
-        [InlineKeyboardButton("👤 ساخت تست با یوزرنیم", callback_data="admin_test_by_username")],
+        [InlineKeyboardButton("🆔 با آیدی عددی", callback_data="test_by_id_simple")],
+        [InlineKeyboardButton("👤 با یوزرنیم", callback_data="test_by_username_simple")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel")]
     ]
-    await query.edit_message_text("🎁 **ساخت سرور تست برای کاربر**\n\nروش مورد نظر را انتخاب کنید:", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text(
+        "🎁 **ساخت تست برای کاربر**\n\n"
+        "لطفاً روش مورد نظر را انتخاب کنید:\n"
+        "سپس آیدی یا یوزرنیم کاربر را ارسال کنید.",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-async def admin_test_by_id_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def test_by_id_simple(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """انتخاب روش آیدی عددی"""
     query = update.callback_query
     await query.answer()
     if not is_admin(query.from_user.id):
         await query.edit_message_text("❌ دسترسی غیرمجاز")
         return
-    await query.edit_message_text("🆔 آیدی عددی کاربر را ارسال کنید:", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو", callback_data="admin_panel")]]))
-    return ASK_TEST_USER
+    
+    context.user_data['test_method'] = 'id'
+    await query.edit_message_text(
+        "🆔 لطفاً **آیدی عددی** کاربر را ارسال کنید:",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو", callback_data="cancel_test_simple")]])
+    )
 
-async def admin_test_by_username_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def test_by_username_simple(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """انتخاب روش یوزرنیم"""
     query = update.callback_query
     await query.answer()
     if not is_admin(query.from_user.id):
         await query.edit_message_text("❌ دسترسی غیرمجاز")
         return
-    await query.edit_message_text("👤 یوزرنیم کاربر را ارسال کنید (مثل @username):", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو", callback_data="admin_panel")]]))
-    return ASK_TEST_USER
+    
+    context.user_data['test_method'] = 'username'
+    await query.edit_message_text(
+        "👤 لطفاً **یوزرنیم** کاربر را ارسال کنید (مثل @username):",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ لغو", callback_data="cancel_test_simple")]])
+    )
 
-async def admin_test_get_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cancel_test_simple(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """لغو ساخت تست"""
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop('awaiting_test_user', None)
+    context.user_data.pop('test_method', None)
+    await query.edit_message_text(
+        "❌ ساخت تست لغو شد.",
+        reply_markup=get_admin_panel_keyboard(is_owner(query.from_user.id))
+    )
+
+async def handle_test_user_input_simple(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت آیدی/یوزرنیم و ساخت تست"""
+    logger.info(f"handle_test_user_input_simple called with text: {update.message.text}")  # <-- اضافه کنید
+    logger.info(f"awaiting_test_user: {context.user_data.get('awaiting_test_user')}")    # <-- اضافه کنید
+    logger.info(f"test_method: {context.user_data.get('test_method')}")      
+    if not context.user_data.get('awaiting_test_user'):
+        return
+    
+    method = context.user_data.get('test_method')
+    if not method:
+        logger.info("Not awaiting test user, ignoring")
+        return
+    
     inp = update.message.text.strip()
-    if inp.isdigit():
+    
+    if method == 'id':
+        if not inp.isdigit():
+            await update.message.reply_text("❌ آیدی باید عدد باشد. دوباره ارسال کنید:")
+            return
         uid = int(inp)
         user = db.get_user(uid)
     else:
-        user = db.get_user_by_username(inp.lstrip('@'))
+        username = inp.lstrip('@')
+        user = db.get_user_by_username(username)
         uid = user['user_id'] if user else None
+    
     if not user:
-        await update.message.reply_text("❌ کاربر یافت نشد. /cancel برای لغو")
-        return ASK_TEST_USER
-    context.user_data['test_user_id'] = uid
-    context.user_data['test_username'] = user.get('username', 'بدون یوزرنیم')
-    await update.message.reply_text(f"✅ کاربر پیدا شد: {user.get('first_name')}\n\n⏳ در حال ساخت سرور تست (1 گیگ / 30 دقیقه)...")
+        await update.message.reply_text("❌ کاربر یافت نشد. دوباره تلاش کنید یا /cancel")
+        return
+    
+    # پاک کردن حالت انتظار
+    context.user_data.pop('awaiting_test_user', None)
+    context.user_data.pop('test_method', None)
+    
+    # ساخت تست
+    msg = await update.message.reply_text(f"✅ کاربر پیدا شد: {user.get('first_name')}\n\n⏳ در حال ساخت سرور تست (۱ گیگ / ۳۰ دقیقه)...")
+    
     result = pg_api.create_test_user()
     if result and result.get('success'):
         link = result['config_link']
-        await update.message.reply_text(f"✅ **سرور تست ساخته شد!**\n\n👤 کاربر: @{context.user_data['test_username']}\n🔗 لینک:\n`{link}`", parse_mode='Markdown', reply_markup=get_admin_panel_keyboard(is_owner(update.effective_user.id)))
+        await msg.edit_text(
+            f"✅ **سرور تست ساخته شد!**\n\n"
+            f"👤 کاربر: @{user.get('username') or str(uid)}\n"
+            f"🔗 لینک اشتراک:\n`{link}`",
+            parse_mode='Markdown',
+            reply_markup=get_admin_panel_keyboard(is_owner(update.effective_user.id))
+        )
         try:
-            await context.bot.send_message(uid, f"🎁 **یک سرویس تست ویژه برای شما ساخته شد!**\n\n⚡ حجم: ۱ گیگابایت\n⏱ مدت: ۳۰ دقیقه\n\n🔗 لینک اشتراک:\n`{link}`\n\n📌 این سرویس توسط ادمین فعال شده است.", parse_mode='Markdown')
+            await context.bot.send_message(
+                uid,
+                f"🎁 **یک سرویس تست ویژه برای شما ساخته شد!**\n\n"
+                f"⚡ حجم: ۱ گیگابایت\n"
+                f"⏱ مدت: ۳۰ دقیقه\n\n"
+                f"🔗 لینک اشتراک:\n`{link}`\n\n"
+                f"📌 این سرویس توسط ادمین فعال شده است.",
+                parse_mode='Markdown'
+            )
         except Exception as e:
-            await update.message.reply_text(f"⚠️ پیام برای کاربر ارسال نشد (ربات را بلاک کرده)")
+            await update.message.reply_text(f"⚠️ پیام برای کاربر ارسال نشد: {e}")
     else:
-        await update.message.reply_text("❌ خطا در ساخت سرور تست!", reply_markup=get_admin_panel_keyboard(is_owner(update.effective_user.id)))
-    return ConversationHandler.END
+        await msg.edit_text(
+            "❌ خطا در ساخت سرور تست!",
+            reply_markup=get_admin_panel_keyboard(is_owner(update.effective_user.id))
+        )
 
 async def delete_plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
@@ -2136,9 +2210,9 @@ async def send_broadcast_messages(app, broadcast_id, admin_id, msg_type, content
 
         # تأخیر بین پیام‌ها
         if idx % 20 == 0:
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(1)
         else:
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.3)
 
     db.update_broadcast_stats(broadcast_id, total, success, failed, 'completed')
     await app.bot.send_message(
@@ -2167,6 +2241,7 @@ def main():
     db.init_db()
     app = Application.builder().token(config.BOT_TOKEN).build()
 
+    # ========== تعریف ConversationHandlerها ==========
     add_plan_conv = ConversationHandler(
         entry_points=[
             CommandHandler("add_plan", add_plan_start),
@@ -2181,34 +2256,28 @@ def main():
         fallbacks=[CommandHandler("cancel", add_plan_cancel)],
         allow_reentry=True,
     )
+    
     charge_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_charge_by_id_start, pattern="^charge_by_id$"), CallbackQueryHandler(admin_charge_by_username_start, pattern="^charge_by_username$")],
         states={ASK_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, manual_charge_get_user)], ASK_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_charge_get_amount)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        
     )
-    test_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_test_by_id_start, pattern="^admin_test_by_id$"), CallbackQueryHandler(admin_test_by_username_start, pattern="^admin_test_by_username$")],
-        states={ASK_TEST_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_test_get_user)]},
-        fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
-        allow_reentry=True,
-        
-    )
+    
     payment_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(rial_payment_start, pattern="^rial_payment$")],
         states={ASK_PAYMENT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, rial_payment_get_amount)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        
     )
+    
     reject_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(reject_payment, pattern="^reject_payment_\\d+$")],
         states={ASK_REJECT_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_reject_reason), CallbackQueryHandler(cancel_reject_callback, pattern="^cancel_reject$")]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        
     )
+    
     debit_conv = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(admin_debit_by_id_start, pattern="^debit_by_id$"),
@@ -2220,49 +2289,38 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        
     )
+    
     add_admin_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(add_admin_start, pattern="^add_admin$")],
         states={ASK_ADMIN_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_admin_get_user)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        
     )
+    
     remove_admin_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(remove_admin_start, pattern="^remove_admin$")],
         states={ASK_REMOVE_ADMIN_USER_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_admin_get_user)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True,
-        
     )
-        # conversation: edit test reminder text
+    
     edit_reminder_text_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_test_reminder_text_start, pattern="^edit_test_reminder_text$")],
         states={ASK_TEST_REMINDER_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_test_reminder_text_get)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True
     )
-    # conversation: edit pre-expire minutes
+    
     edit_pre_expire_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(edit_pre_expire_minutes_start, pattern="^edit_pre_expire_minutes$")],
         states={ASK_PRE_EXPIRE_MINUTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_pre_expire_minutes_get)]},
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True
     )
-    
-    # Broadcast handlers (بدون ConversationHandler)
-    app.add_handler(CallbackQueryHandler(broadcast_start, pattern="^broadcast_start$"))
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_handle_message))
-    app.add_handler(CallbackQueryHandler(broadcast_filter_handler, pattern="^broadcast_filter_"))
-    app.add_handler(CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm_yes$"))
-    app.add_handler(CommandHandler("cancel", cancel_broadcast))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("delete_plan", delete_plan_command))
-    app.add_handler(CommandHandler("cancel", manual_charge_cancel))
+    # ========== 1. اضافه کردن ConversationHandlerها ==========
     app.add_handler(charge_conv)
-    app.add_handler(test_conv)
     app.add_handler(payment_conv)
     app.add_handler(reject_conv)
     app.add_handler(debit_conv)
@@ -2271,10 +2329,31 @@ def main():
     app.add_handler(remove_admin_conv)
     app.add_handler(edit_reminder_text_conv)
     app.add_handler(edit_pre_expire_conv)
-    app.add_handler(CallbackQueryHandler(test_reminder_settings_menu, pattern="^test_reminder_settings$"))
-    app.add_handler(CallbackQueryHandler(toggle_test_reminder, pattern="^toggle_test_reminder$"))
+
+    # ========== 2. تست (باید قبل از broadcast بیاید) ==========
+    app.add_handler(CallbackQueryHandler(admin_make_test_menu, pattern="^admin_make_test$"))
+    app.add_handler(CallbackQueryHandler(test_by_id_simple, pattern="^test_by_id_simple$"))
+    app.add_handler(CallbackQueryHandler(test_by_username_simple, pattern="^test_by_username_simple$"))
+    app.add_handler(CallbackQueryHandler(cancel_test_simple, pattern="^cancel_test_simple$"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_test_user_input_simple))
+
+    # ========== 3. Broadcast handlers ==========
+    app.add_handler(CallbackQueryHandler(broadcast_start, pattern="^broadcast_start$"))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, broadcast_handle_message))
+    app.add_handler(CallbackQueryHandler(broadcast_filter_handler, pattern="^broadcast_filter_"))
+    app.add_handler(CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm_yes$"))
+    app.add_handler(CommandHandler("cancel", cancel_broadcast))
+
+    # ========== 4. Command handlers ==========
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("delete_plan", delete_plan_command))
+    app.add_handler(CommandHandler("cancel", manual_charge_cancel))
     app.add_handler(CommandHandler("addadmin", add_admin_start))
     app.add_handler(CommandHandler("addplan", add_plan_start))
+
+    # ========== 5. CallbackQuery handlers (غیر از那些 که قبلاً اضافه شدند) ==========
+    app.add_handler(CallbackQueryHandler(test_reminder_settings_menu, pattern="^test_reminder_settings$"))
+    app.add_handler(CallbackQueryHandler(toggle_test_reminder, pattern="^toggle_test_reminder$"))
     app.add_handler(CallbackQueryHandler(restart_bot, pattern="^restart_bot$"))
     app.add_handler(CallbackQueryHandler(manual_backup, pattern="^manual_backup$"))
 
@@ -2293,48 +2372,41 @@ def main():
     app.add_handler(CallbackQueryHandler(admin_list_plans_menu, pattern="^admin_list_plans$"))
     app.add_handler(CallbackQueryHandler(admin_list_users, pattern="^admin_list_users$"))
     app.add_handler(CallbackQueryHandler(admin_total_balance, pattern="^admin_total_balance$"))
-    app.add_handler(CallbackQueryHandler(admin_make_test_menu, pattern="^admin_make_test$"))
     app.add_handler(CallbackQueryHandler(admin_debit_menu, pattern="^admin_debit_balance$"))
     app.add_handler(CallbackQueryHandler(admin_manage_admins, pattern="^admin_manage_admins$"))
     app.add_handler(CallbackQueryHandler(list_admins, pattern="^list_admins$"))
-    
     app.add_handler(CallbackQueryHandler(export_transactions, pattern="^export_transactions$"))
 
     app.add_handler(CallbackQueryHandler(pending_payments_list, pattern="^pending_payments_list$"))
     app.add_handler(CallbackQueryHandler(pending_pagination, pattern="^pending_page_\\d+$"))
     app.add_handler(CallbackQueryHandler(view_payment_details, pattern="^view_payment_\\d+$"))
-    
     app.add_handler(CallbackQueryHandler(approve_payment, pattern="^approve_payment_\\d+$"))
 
     app.add_handler(CallbackQueryHandler(users_pagination, pattern="^users_page_\\d+$"))
     app.add_handler(CallbackQueryHandler(export_users_excel, pattern="^export_users_excel$"))
     
-
-    #Refferal-handlers
+    # Referral handlers
     app.add_handler(CallbackQueryHandler(ref_set_referrer_bonus, pattern="^ref_set_referrer_bonus$"))
     app.add_handler(CallbackQueryHandler(ref_set_referred_bonus, pattern="^ref_set_referred_bonus$"))
     app.add_handler(CallbackQueryHandler(ref_set_percent, pattern="^ref_set_percent$"))
     app.add_handler(CallbackQueryHandler(ref_set_event_start, pattern="^ref_set_event_start$"))
     app.add_handler(CallbackQueryHandler(ref_set_event_end, pattern="^ref_set_event_end$"))
-
     app.add_handler(CallbackQueryHandler(referral_admin_panel, pattern="^referral_admin_panel$"))
     app.add_handler(CallbackQueryHandler(referral_toggle_status, pattern="^referral_toggle_status$"))
     app.add_handler(CallbackQueryHandler(referral_reset_stats, pattern="^referral_reset_stats$"))
     app.add_handler(CallbackQueryHandler(referral_menu, pattern="^referral_menu$"))
     app.add_handler(CallbackQueryHandler(my_referral_link, pattern="^my_referral_link$"))
-
     app.add_handler(CallbackQueryHandler(export_referral_report, pattern="^export_referral_report$"))
 
     # Accounting handlers
     app.add_handler(CallbackQueryHandler(accounting_report, pattern="^accounting_report$"))
     app.add_handler(CallbackQueryHandler(export_accounting_excel, pattern="^export_accounting_excel$"))
 
-        # هندلر عمومی برای ورودی تنظیمات رفرال (عدد و تاریخ)
+    # ========== 6. Message handlers (آخرین اولویت) ==========
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ref_setting_input), group=1)
-    
     app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_receipt))
     
-        # راه‌اندازی JobQueue برای یادآوری تست
+    # JobQueue
     if app.job_queue:
         app.job_queue.run_repeating(check_test_reminders, interval=60, first=10)
     else:
