@@ -149,6 +149,24 @@ def init_db():
         )
     ''')
     
+
+        # Sales logs for accounting
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sales_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            plan_id INTEGER NOT NULL,
+            traffic_gb INTEGER NOT NULL,
+            user_price INTEGER NOT NULL,
+            panel_cost INTEGER NOT NULL,
+            referral_cost INTEGER DEFAULT 0,
+            net_profit INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (order_id) REFERENCES orders(id)
+        )
+    ''')
+
     # Add referral_code and referrer_id to users table (اگر وجود نداشته باشد)
     try:
         cursor.execute('ALTER TABLE users ADD COLUMN referral_code TEXT UNIQUE')
@@ -162,6 +180,8 @@ def init_db():
         cursor.execute('ALTER TABLE users ADD COLUMN referral_earnings INTEGER DEFAULT 0')
     except sqlite3.OperationalError:
         pass
+
+    
 
     
 
@@ -1081,6 +1101,121 @@ def export_referral_logs_to_excel():
         ws.column_dimensions[col_letter].width = adjusted_width
     
     # Save to temporary file
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    wb.save(temp_file.name)
+    temp_file.close()
+    return temp_file.name
+
+
+# ==================== Accounting ====================
+
+def add_sales_log(order_id: int, user_id: int, plan_id: int, traffic_gb: int, 
+                  user_price: int, panel_cost_per_gb: int, referral_cost: int = 0) -> bool:
+    """ثبت یک فروش با محاسبه خودکار سود خالص"""
+    panel_cost = traffic_gb * panel_cost_per_gb
+    net_profit = user_price - panel_cost - referral_cost
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO sales_logs (order_id, user_id, plan_id, traffic_gb, user_price, panel_cost, referral_cost, net_profit)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (order_id, user_id, plan_id, traffic_gb, user_price, panel_cost, referral_cost, net_profit))
+    conn.commit()
+    conn.close()
+    return True
+
+def get_accounting_summary() -> Dict:
+    """دریافت خلاصه حسابداری"""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    # کل فروش
+    cursor.execute('SELECT SUM(user_price) FROM sales_logs')
+    total_sales = cursor.fetchone()[0] or 0
+    
+    # کل هزینه پنل
+    cursor.execute('SELECT SUM(panel_cost) FROM sales_logs')
+    total_panel_cost = cursor.fetchone()[0] or 0
+    
+    # کل هزینه رفرال
+    cursor.execute('SELECT SUM(referral_cost) FROM sales_logs')
+    total_referral_cost = cursor.fetchone()[0] or 0
+    
+    # کل سود خالص
+    cursor.execute('SELECT SUM(net_profit) FROM sales_logs')
+    total_net_profit = cursor.fetchone()[0] or 0
+    
+    conn.close()
+    return {
+        'total_sales': total_sales,
+        'total_panel_cost': total_panel_cost,
+        'total_referral_cost': total_referral_cost,
+        'total_net_profit': total_net_profit,
+        'due_to_panel': total_panel_cost  # بدهی به صاحب پنل
+    }
+
+def export_accounting_to_excel():
+    """خروجی اکسل از تمام فروش‌ها برای حسابداری"""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import tempfile
+    import os
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT 
+            sl.id,
+            sl.created_at,
+            u.username,
+            u.first_name,
+            p.name as plan_name,
+            sl.traffic_gb,
+            sl.user_price,
+            sl.panel_cost,
+            sl.referral_cost,
+            sl.net_profit
+        FROM sales_logs sl
+        LEFT JOIN users u ON sl.user_id = u.user_id
+        LEFT JOIN plans p ON sl.plan_id = p.id
+        ORDER BY sl.created_at DESC
+    ''')
+    rows = cursor.fetchall()
+    conn.close()
+    
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "حسابداری فروش"
+    
+    headers = ['شناسه', 'تاریخ', 'کاربر (یوزرنیم)', 'کاربر (نام)', 'پلن', 'حجم (GB)', 'مبلغ پرداختی', 'هزینه پنل', 'هزینه رفرال', 'سود خالص']
+    ws.append(headers)
+    
+    # Styling
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    for col in range(1, len(headers)+1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+    
+    # Data
+    for row in rows:
+        ws.append(list(row))
+    
+    # Adjust widths
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = min(max_length + 2, 30)
+        ws.column_dimensions[col_letter].width = adjusted_width
+    
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
     wb.save(temp_file.name)
     temp_file.close()

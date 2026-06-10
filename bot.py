@@ -86,6 +86,7 @@ def get_admin_panel_keyboard(owner: bool = False):
         keyboard.insert(7, [InlineKeyboardButton("🎁 تنظیمات رفرال", callback_data="referral_admin_panel")])
         keyboard.insert(8, [InlineKeyboardButton("📦 بک‌آپ دستی", callback_data="manual_backup")])
         keyboard.insert(8, [InlineKeyboardButton("📊 گزارش رفرال", callback_data="export_referral_report")])
+        keyboard.insert(9, [InlineKeyboardButton("📊 حسابداری", callback_data="accounting_report")])
     keyboard.append([InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main")])
     return InlineKeyboardMarkup(keyboard)
 
@@ -319,6 +320,18 @@ async def handle_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await context.bot.send_message(referrer_id, f"🎉 کاربری که دعوت کردید خریدی انجام داد!\n💰 {commission:,} تومان به کیف پولتان اضافه شد.")
                     except:
                         pass
+            # ثبت لاگ حسابداری
+        panel_cost_per_gb = 7000  # هزینه هر گیگ به صاحب پنل
+        referral_cost = commission if 'commission' in locals() else 0
+        db.add_sales_log(
+            order_id=order_id,
+            user_id=user_id,
+            plan_id=plan['id'],
+            traffic_gb=plan['traffic_gb'],
+            user_price=plan['price_rial'],
+            panel_cost_per_gb=panel_cost_per_gb,
+            referral_cost=referral_cost
+        )
         await query.edit_message_text(f"✅ **خرید موفق!**\n\n🔗 لینک اشتراک:\n`{result['config_link']}`", parse_mode='Markdown', reply_markup=get_back_button())
     else:
         db.update_balance(user_id, plan['price_rial'])
@@ -1783,6 +1796,60 @@ async def export_referral_report(update: Update, context: ContextTypes.DEFAULT_T
 
 
 
+# ==================== ACCOUNTING ====================
+async def accounting_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """نمایش خلاصه حسابداری (فقط مالک)"""
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(query.from_user.id):
+        await query.edit_message_text("❌ فقط مالک ربات به این بخش دسترسی دارد.", reply_markup=get_back_button())
+        return
+    
+    summary = db.get_accounting_summary()
+    
+    text = f"📊 **گزارش حسابداری**\n\n"
+    text += f"💰 کل فروش: {summary['total_sales']:,} تومان\n"
+    text += f"🏭 هزینه پنل (بدهی به صاحب پنل): {summary['total_panel_cost']:,} تومان\n"
+    text += f"🎁 پاداش رفرال پرداختی: {summary['total_referral_cost']:,} تومان\n"
+    text += f"📈 سود خالص شما: {summary['total_net_profit']:,} تومان\n"
+    text += f"⚠️ مبلغ قابل برداشت (با احتیاط): {summary['total_sales'] - summary['total_panel_cost'] - summary['total_referral_cost']:,} تومان\n\n"
+    text += f"🔹 توصیه: حداقل {summary['total_panel_cost']:,} تومان را برای پرداخت به صاحب پنل نگه دارید."
+    
+    keyboard = [
+        [InlineKeyboardButton("📥 خروجی اکسل فروش", callback_data="export_accounting_excel")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel")]
+    ]
+    await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def export_accounting_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """خروجی اکسل از تمام فروش‌ها (فقط مالک)"""
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(query.from_user.id):
+        await query.edit_message_text("❌ فقط مالک ربات به این بخش دسترسی دارد.", reply_markup=get_back_button())
+        return
+    
+    await query.edit_message_text("⏳ در حال تولید فایل اکسل حسابداری...")
+    try:
+        file_path = db.export_accounting_to_excel()
+        with open(file_path, 'rb') as f:
+            await context.bot.send_document(
+                chat_id=query.from_user.id,
+                document=f,
+                filename=f"accounting_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                caption="📊 **گزارش کامل حسابداری**"
+            )
+        import os
+        os.remove(file_path)
+    except Exception as e:
+        logger.error(f"Excel export error: {e}")
+        await query.edit_message_text("❌ خطا در تولید فایل اکسل.")
+        return
+    
+    owner = is_owner(query.from_user.id)
+    await context.bot.send_message(chat_id=query.from_user.id, text="⚙️ **پنل مدیریت**", parse_mode='Markdown', reply_markup=get_admin_panel_keyboard(owner))
+
+
 # ==================== MAIN ====================
 
 def main():
@@ -1939,6 +2006,10 @@ def main():
     app.add_handler(CallbackQueryHandler(my_referral_link, pattern="^my_referral_link$"))
 
     app.add_handler(CallbackQueryHandler(export_referral_report, pattern="^export_referral_report$"))
+
+    # Accounting handlers
+    app.add_handler(CallbackQueryHandler(accounting_report, pattern="^accounting_report$"))
+    app.add_handler(CallbackQueryHandler(export_accounting_excel, pattern="^export_accounting_excel$"))
 
         # هندلر عمومی برای ورودی تنظیمات رفرال (عدد و تاریخ)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ref_setting_input), group=1)
