@@ -48,19 +48,18 @@ def is_owner(user_id: int) -> bool:
 # ==================== KEYBOARDS ====================
 
 def get_main_keyboard(user_id: int = None):
-    # Check if user is admin (including owner)
     admin = is_admin(user_id) if user_id else False
     if admin:
         keyboard = [
             [InlineKeyboardButton("💰 کیف پول من", callback_data="wallet"), InlineKeyboardButton("📦 خرید پلن", callback_data="buy_plan")],
             [InlineKeyboardButton("🎁 درخواست تست", callback_data="test_request"), InlineKeyboardButton("📞 پشتیبانی", callback_data="support")],
-            [InlineKeyboardButton("🔗 دعوت از دوستان", callback_data="referral_menu")]
+            [InlineKeyboardButton("🔗 دعوت از دوستان", callback_data="referral_menu")],
             [InlineKeyboardButton("⚙️ پنل مدیریت", callback_data="admin_panel")]
         ]
     else:
         keyboard = [
             [InlineKeyboardButton("💰 کیف پول من", callback_data="wallet"), InlineKeyboardButton("📦 خرید پلن", callback_data="buy_plan")],
-            [InlineKeyboardButton("🎁 درخواست تست", callback_data="test_request"), InlineKeyboardButton("📞 پشتیبانی", callback_data="support")]
+            [InlineKeyboardButton("🎁 درخواست تست", callback_data="test_request"), InlineKeyboardButton("📞 پشتیبانی", callback_data="support")],
             [InlineKeyboardButton("🔗 دعوت از دوستان", callback_data="referral_menu")]
         ]
     return InlineKeyboardMarkup(keyboard)
