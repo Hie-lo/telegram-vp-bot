@@ -2136,9 +2136,9 @@ async def send_broadcast_messages(app, broadcast_id, admin_id, msg_type, content
 
         # تأخیر بین پیام‌ها
         if idx % 20 == 0:
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.4)
         else:
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.1)
 
     db.update_broadcast_stats(broadcast_id, total, success, failed, 'completed')
     await app.bot.send_message(
