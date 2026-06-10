@@ -1004,3 +1004,84 @@ def reset_referral_stats(user_id: int = None):
         cursor.execute('UPDATE users SET referral_earnings = 0')
     conn.commit()
     conn.close()
+
+def export_referral_logs_to_excel():
+    """Generate Excel file from all referral logs and return file path"""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import tempfile
+    import os
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT 
+            rl.id,
+            rl.referrer_id,
+            COALESCE(ref_user.username, 'کاربر حذف شده') as referrer_username,
+            COALESCE(ref_user.first_name, '') as referrer_name,
+            rl.referred_id,
+            COALESCE(rec_user.username, 'کاربر حذف شده') as referred_username,
+            COALESCE(rec_user.first_name, '') as referred_name,
+            rl.type,
+            rl.amount,
+            rl.created_at
+        FROM referral_logs rl
+        LEFT JOIN users ref_user ON rl.referrer_id = ref_user.user_id
+        LEFT JOIN users rec_user ON rl.referred_id = rec_user.user_id
+        ORDER BY rl.created_at DESC
+    ''')
+    logs = cursor.fetchall()
+    conn.close()
+    
+    # Create workbook and sheet
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "گزارش رفرال"
+    
+    # Headers
+    headers = ['شناسه', 'معرف (ID)', 'معرف (یوزرنیم)', 'معرف (نام)', 'معرفی‌شونده (ID)', 'معرفی‌شونده (یوزرنیم)', 'معرفی‌شونده (نام)', 'نوع رویداد', 'مبلغ پاداش (تومان)', 'تاریخ']
+    ws.append(headers)
+    
+    # Style headers
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    for col in range(1, len(headers)+1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+    
+    # Add data
+    for log in logs:
+        ws.append([
+            log[0],
+            log[1],
+            log[2] or '',
+            log[3] or '',
+            log[4],
+            log[5] or '',
+            log[6] or '',
+            'ثبت‌نام' if log[7] == 'signup' else 'خرید',
+            log[8] or 0,
+            log[9]
+        ])
+    
+    # Adjust column widths
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = min(max_length + 2, 30)
+        ws.column_dimensions[col_letter].width = adjusted_width
+    
+    # Save to temporary file
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    wb.save(temp_file.name)
+    temp_file.close()
+    return temp_file.name

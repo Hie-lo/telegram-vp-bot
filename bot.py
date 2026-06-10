@@ -85,6 +85,7 @@ def get_admin_panel_keyboard(owner: bool = False):
         keyboard.insert(6, [InlineKeyboardButton("⚙️ تنظیمات پیام تست", callback_data="test_reminder_settings")]) 
         keyboard.insert(7, [InlineKeyboardButton("🎁 تنظیمات رفرال", callback_data="referral_admin_panel")])
         keyboard.insert(8, [InlineKeyboardButton("📦 بک‌آپ دستی", callback_data="manual_backup")])
+        keyboard.insert(8, [InlineKeyboardButton("📊 گزارش رفرال", callback_data="export_referral_report")])
     keyboard.append([InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main")])
     return InlineKeyboardMarkup(keyboard)
 
@@ -1747,6 +1748,41 @@ async def handle_ref_setting_input(update: Update, context: ContextTypes.DEFAULT
         keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="referral_admin_panel")]]
         await update.message.reply_text(reply_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
+# ==================== EXPORT REFERRAL REPORT (OWNER ONLY) ====================
+
+async def export_referral_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Export all referral logs to Excel file (owner only)"""
+    query = update.callback_query
+    await query.answer()
+    
+    if not is_owner(query.from_user.id):
+        await query.edit_message_text("❌ فقط مالک ربات به این بخش دسترسی دارد.", reply_markup=get_back_button())
+        return
+    
+    await query.edit_message_text("⏳ در حال تولید فایل اکسل گزارش رفرال... لطفاً صبر کنید.")
+    
+    try:
+        file_path = db.export_referral_logs_to_excel()
+        with open(file_path, 'rb') as f:
+            await context.bot.send_document(
+                chat_id=query.from_user.id,
+                document=f,
+                filename=f"referral_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                caption="📊 **گزارش کامل رفرال‌ها**\n\nتاریخ: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+        import os
+        os.remove(file_path)
+    except Exception as e:
+        logger.error(f"Excel export error: {e}")
+        await query.edit_message_text("❌ خطا در تولید فایل اکسل. لطفاً دوباره تلاش کنید.", reply_markup=get_back_button())
+        return
+    
+    # بعد از ارسال فایل، دوباره پنل مدیریت را نمایش بده
+    owner = is_owner(query.from_user.id)
+    await context.bot.send_message(chat_id=query.from_user.id, text="⚙️ **پنل مدیریت**", parse_mode='Markdown', reply_markup=get_admin_panel_keyboard(owner))
+
+
+
 # ==================== MAIN ====================
 
 def main():
@@ -1901,6 +1937,8 @@ def main():
     app.add_handler(CallbackQueryHandler(referral_reset_stats, pattern="^referral_reset_stats$"))
     app.add_handler(CallbackQueryHandler(referral_menu, pattern="^referral_menu$"))
     app.add_handler(CallbackQueryHandler(my_referral_link, pattern="^my_referral_link$"))
+
+    app.add_handler(CallbackQueryHandler(export_referral_report, pattern="^export_referral_report$"))
 
         # هندلر عمومی برای ورودی تنظیمات رفرال (عدد و تاریخ)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ref_setting_input), group=1)
