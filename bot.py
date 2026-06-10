@@ -501,16 +501,19 @@ async def admin_list_plans_menu(update: Update, context: ContextTypes.DEFAULT_TY
 async def admin_list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """نمایش لیست کاربران با صفحه‌بندی (ادمین‌ها)"""
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except:
+        pass
     if not is_admin(query.from_user.id):
         await query.edit_message_text("❌ دسترسی غیرمجاز", reply_markup=get_back_button())
         return
     
-    # دریافت صفحه جاری از context (پیش‌فرض 1)
+    # دریافت صفحه جاری
     page = context.user_data.get('users_page', 1)
     per_page = 10
     total_users = db.count_users()
-    total_pages = (total_users + per_page - 1) // per_page
+    total_pages = (total_users + per_page - 1) // per_page if total_users > 0 else 1
     
     if page < 1:
         page = 1
@@ -545,7 +548,12 @@ async def admin_list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel")])
     
-    await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    try:
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception as e:
+        logger.error(f"Error in admin_list_users: {e}")
+        # اگر خطا در ویرایش بود، پیام جدید بفرست
+        await context.bot.send_message(chat_id=query.from_user.id, text=text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def users_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """تغییر صفحه در لیست کاربران"""
@@ -2064,6 +2072,7 @@ def main():
 
     app.add_handler(CallbackQueryHandler(users_pagination, pattern="^users_page_\\d+$"))
     app.add_handler(CallbackQueryHandler(export_users_excel, pattern="^export_users_excel$"))
+    
 
     #Refferal-handlers
     app.add_handler(CallbackQueryHandler(ref_set_referrer_bonus, pattern="^ref_set_referrer_bonus$"))
