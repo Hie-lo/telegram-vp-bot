@@ -352,12 +352,12 @@ async def test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if db.has_test_request(user_id):
         await query.edit_message_text("❌ شما قبلاً از سرویس تست استفاده کرده‌اید.", reply_markup=get_back_button())
         return
-    await query.edit_message_text("⏳ در حال ساخت سرور تست 1 گیگ / 30 دقیقه...", reply_markup=get_back_button())
+    await query.edit_message_text("⏳ در حال ساخت سرور تست 100 مگابایت / 60 دقیقه...", reply_markup=get_back_button())
     result = pg_api.create_test_user()
     if result and result.get('success'):
-        expire_time = datetime.now() + timedelta(minutes=30)
+        expire_time = datetime.now() + timedelta(minutes=60)
         db.add_test_request(user_id, expire_time)
-        await query.edit_message_text(f"🎁 **سرور تست آماده شد!**\n\n🔗 لینک:\n`{result['config_link']}`\n\n⏱ 30 دقیقه معتبر است.", parse_mode='Markdown', reply_markup=get_back_button())
+        await query.edit_message_text(f"🎁 **سرور تست آماده شد!**\n\n🔗 لینک:\n`{result['config_link']}`\n\n⏱ 60 دقیقه معتبر است.", parse_mode='Markdown', reply_markup=get_back_button())
     else:
         await query.edit_message_text("❌ خطا در ساخت سرور تست.", reply_markup=get_back_button())
 
@@ -967,7 +967,7 @@ async def handle_test_user_input_simple(update: Update, context: ContextTypes.DE
     context.user_data.pop('test_method', None)
     
     # ساخت تست
-    msg = await update.message.reply_text(f"✅ کاربر پیدا شد: {user.get('first_name')}\n\n⏳ در حال ساخت سرور تست (۱ گیگ / ۳۰ دقیقه)...")
+    msg = await update.message.reply_text(f"✅ کاربر پیدا شد: {user.get('first_name')}\n\n⏳ در حال ساخت سرور تست (100 مگابایت / 60 دقیقه)...")
     
     result = pg_api.create_test_user()
     if result and result.get('success'):
@@ -983,8 +983,8 @@ async def handle_test_user_input_simple(update: Update, context: ContextTypes.DE
             await context.bot.send_message(
                 uid,
                 f"🎁 **یک سرویس تست ویژه برای شما ساخته شد!**\n\n"
-                f"⚡ حجم: ۱ گیگابایت\n"
-                f"⏱ مدت: ۳۰ دقیقه\n\n"
+                f"⚡ حجم: 100 مگابایت\n"
+                f"⏱ مدت: 60 دقیقه\n\n"
                 f"🔗 لینک اشتراک:\n`{link}`\n\n"
                 f"📌 این سرویس توسط ادمین فعال شده است.",
                 parse_mode='Markdown'

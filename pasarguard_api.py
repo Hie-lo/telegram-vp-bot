@@ -105,28 +105,38 @@ class PasarGuardAPI:
             print(f"Request error: {e}")
             return None
     
-    def create_user(self, traffic_gb: int, expire_days: int, username: str = None) -> Optional[Dict]:
+    def create_user(self, traffic_gb: int = None, expire_days: int = None, username: str = None, 
+                data_limit_bytes: int = None, expire_timestamp: int = None) -> Optional[Dict]:
         """Create a new user in PasarGuard panel"""
         if username is None:
             username = f"user_{datetime.now().timestamp()}"
         
-        # حجم به بایت
-        data_limit_bytes = traffic_gb * 1024 * 1024 * 1024
+        # تعیین حجم نهایی (اولویت با data_limit_bytes است)
+        if data_limit_bytes is not None:
+            final_data_limit = data_limit_bytes
+        elif traffic_gb is not None:
+            final_data_limit = traffic_gb * 1024 * 1024 * 1024
+        else:
+            final_data_limit = 0  # نامحدود
         
-        # زمان انقضا به صورت timestamp (ثانیه) از UTC
-        expire_timestamp = int((datetime.now() + timedelta(days=expire_days)).timestamp())
+        # تعیین زمان انقضا (اولویت با expire_timestamp است)
+        if expire_timestamp is not None:
+            final_expire = expire_timestamp
+        elif expire_days is not None:
+            final_expire = int((datetime.now() + timedelta(days=expire_days)).timestamp())
+        else:
+            final_expire = 0  # بدون انقضا
         
         payload = {
             "username": username,
-            "data_limit": data_limit_bytes,
-            "expire": expire_timestamp,
+            "data_limit": final_data_limit,
+            "expire": final_expire,
             "status": "active",
             "data_limit_reset_strategy": "no_reset",
-            "group_ids": [9,8]
-            #15 , 9 , 8
+            "group_ids": [9, 8]
         }
         
-        print(f"📤 Sending: {traffic_gb}GB = {data_limit_bytes} bytes, expire timestamp: {expire_timestamp}")
+        print(f"📤 Sending: {final_data_limit} bytes, expire timestamp: {final_expire}")
         
         result = self._make_request("POST", "/api/user", payload)
         
@@ -141,6 +151,21 @@ class PasarGuardAPI:
         return None
         
     def create_test_user(self) -> Optional[Dict]:
-        # 30 دقیقه = 0.020833 روز
-        expire_days = 30 / (24 * 60)  # 30 / 1440 = 0.020833...
-        return self.create_user(traffic_gb=1, expire_days=expire_days, username=f"test_{datetime.now().timestamp()}")
+        # حجم 100 مگابایت به بایت (100 * 1024 * 1024)
+        test_traffic_bytes = 100 * 1024 * 1024  # 104857600 bytes
+        
+        # زمان انقضا 1 ساعت بعد از حالا (به ثانیه)
+        expire_timestamp = int((datetime.now() + timedelta(hours=1)).timestamp())
+        
+        # استفاده از نام کاربری یکتا برای تست
+        test_username = f"test_{datetime.now().timestamp()}"
+        
+        # فراخوانی تابع create_user با مقادیر جدید
+        return self.create_user(
+            traffic_gb=0,  # این پارامتر دیگر مستقیماً استفاده نمی‌شود، اما برای سازگاری ارسال می‌شود
+            expire_days=0, # این پارامتر دیگر مستقیماً استفاده نمی‌شود
+            username=test_username,
+            # اضافه کردن پارامترهای جدید به صورت مستقیم
+            data_limit_bytes=test_traffic_bytes,
+            expire_timestamp=expire_timestamp
+        )
