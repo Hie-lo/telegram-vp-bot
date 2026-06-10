@@ -1288,7 +1288,6 @@ def export_users_to_excel():
     cursor = conn.cursor()
     cursor.execute('''
         SELECT user_id, username, first_name, balance, created_at, 
-               COALESCE(is_banned, 0) as is_banned,
                COALESCE(referrer_id, '') as referrer_id,
                COALESCE(referral_code, '') as referral_code
         FROM users
@@ -1301,7 +1300,7 @@ def export_users_to_excel():
     ws = wb.active
     ws.title = "لیست کاربران"
     
-    headers = ['شناسه کاربر', 'یوزرنیم', 'نام', 'موجودی (تومان)', 'تاریخ عضویت', 'وضعیت بن', 'معرف (ID)', 'کد رفرال']
+    headers = ['شناسه کاربر', 'یوزرنیم', 'نام', 'موجودی (تومان)', 'تاریخ عضویت', 'معرف (ID)', 'کد رفرال']
     ws.append(headers)
     
     header_font = Font(bold=True, color="FFFFFF")
@@ -1315,8 +1314,7 @@ def export_users_to_excel():
     for u in users:
         ws.append([
             u[0], u[1] or '', u[2] or '', u[3] or 0, u[4], 
-            'بن شده' if u[5] else 'فعال',
-            u[6] or '', u[7] or ''
+            u[5] or '', u[6] or ''
         ])
     
     # تنظیم عرض ستون‌ها
