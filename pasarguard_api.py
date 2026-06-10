@@ -141,6 +141,11 @@ class PasarGuardAPI:
         return None
         
     def create_test_user(self) -> Optional[Dict]:
-        # 30 دقیقه = 0.020833 روز
-        expire_days = 30 / (24 * 60)  # 30 / 1440 = 0.020833...
-        return self.create_user(traffic_gb=1, expire_days=expire_days, username=f"test_{datetime.now().timestamp()}")
+    # 1 ساعت = 0.0416667 روز
+        expire_days = 60 / (24 * 60)
+
+        return self.create_user(
+            traffic_gb=100 / 1024,
+            expire_days=expire_days,
+            username=f"test_{datetime.now().timestamp()}"
+        )
