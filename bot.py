@@ -525,10 +525,11 @@ async def admin_list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ساخت متن
     text = f"👥 **لیست کاربران** (صفحه {page} از {total_pages})\n\n"
     for u in users:
-        ban_status = "🚫 بن شده" if u.get('is_banned', 0) else "✅ فعال"
+        # ban_status = "🚫 بن شده" if u.get('is_banned', 0) else "✅ فعال"
         text += f"🆔 `{u['user_id']}`\n"
         text += f"👤 @{u['username'] or 'بدون یوزرنیم'} | {u['first_name'] or 'نامشخص'}\n"
-        text += f"💰 موجودی: {u['balance']:,} تومان | {ban_status}\n"
+        # text += f"💰 موجودی: {u['balance']:,} تومان | {ban_status}\n"
+        text += f"💰 موجودی: {u['balance']:,} تومان\n"
         text += f"📅 تاریخ عضویت: {u['created_at'][:16]}\n"
         text += f"─────────────────\n"
     

@@ -1257,7 +1257,7 @@ def get_users_paginated(page: int = 1, per_page: int = 10, order_by: str = 'newe
     offset = (page - 1) * per_page
     order_clause = "ORDER BY created_at DESC" if order_by == 'newest' else "ORDER BY created_at ASC"
     cursor.execute(f'''
-        SELECT user_id, username, first_name, balance, created_at, is_banned
+        SELECT user_id, username, first_name, balance, created_at
         FROM users
         {order_clause}
         LIMIT ? OFFSET ?
