@@ -1,6 +1,10 @@
+import os
 import sqlite3
 from typing import Optional, Dict, List, Tuple
 from datetime import datetime, timedelta
+import shutil
+import tempfile
+
 DB_NAME = 'pasarguard_data.db'
 
 def get_db():
@@ -117,12 +121,54 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+        # Referral settings table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS referral_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            is_active BOOLEAN DEFAULT 0,
+            signup_bonus_referrer INTEGER DEFAULT 0,
+            signup_bonus_referred INTEGER DEFAULT 0,
+            purchase_percent INTEGER DEFAULT 5,
+            event_start_date TIMESTAMP,
+            event_end_date TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Referral logs table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS referral_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            referrer_id INTEGER NOT NULL,
+            referred_id INTEGER NOT NULL,
+            type TEXT NOT NULL,  -- 'signup', 'purchase'
+            amount INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (referrer_id) REFERENCES users(user_id),
+            FOREIGN KEY (referred_id) REFERENCES users(user_id)
+        )
+    ''')
+    
+    # Add referral_code and referrer_id to users table (اگر وجود نداشته باشد)
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN referral_code TEXT UNIQUE')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN referrer_id INTEGER')
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN referral_earnings INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
 
     
 
 
     conn.commit()
     conn.close()
+    init_referral_settings()
     init_payment_table()
     add_test_reminder_columns()
     init_test_reminder_settings()
@@ -812,5 +858,149 @@ def mark_reminder_sent(user_id: int):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('UPDATE test_requests SET reminder_sent = 1 WHERE user_id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+
+def create_backup() -> str:
+    """ایجاد یک کپی موقت از فایل دیتابیس و بازگرداندن مسیر فایل"""
+    try:
+        # مسیر فایل دیتابیس اصلی
+        db_path = DB_NAME
+        if not os.path.exists(db_path):
+            return None
+        
+        # ایجاد یک فایل موقت
+        temp_fd, temp_path = tempfile.mkstemp(suffix='.db')
+        os.close(temp_fd)
+        
+        # کپی فایل دیتابیس به فایل موقت
+        shutil.copy2(db_path, temp_path)
+        return temp_path
+    except Exception as e:
+        print(f"Backup error: {e}")
+        return None
+    
+
+# ==================== Referral System ====================
+
+def init_referral_settings():
+    """ایجاد رکورد پیش‌فرض تنظیمات رفرال اگر وجود نداشته باشد"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM referral_settings')
+    if cursor.fetchone()[0] == 0:
+        cursor.execute('''
+            INSERT INTO referral_settings (is_active, signup_bonus_referrer, signup_bonus_referred, purchase_percent)
+            VALUES (0, 5000, 2000, 5)
+        ''')
+        conn.commit()
+    conn.close()
+
+def get_referral_settings() -> Dict:
+    """دریافت تنظیمات فعلی رفرال"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM referral_settings ORDER BY id DESC LIMIT 1')
+    result = cursor.fetchone()
+    conn.close()
+    return dict(result) if result else {}
+
+def update_referral_settings(is_active: bool = None, signup_bonus_referrer: int = None,
+                             signup_bonus_referred: int = None, purchase_percent: int = None,
+                             event_start_date: str = None, event_end_date: str = None) -> bool:
+    """به‌روزرسانی تنظیمات رفرال"""
+    conn = get_db()
+    cursor = conn.cursor()
+    fields = []
+    values = []
+    if is_active is not None:
+        fields.append('is_active = ?')
+        values.append(1 if is_active else 0)
+    if signup_bonus_referrer is not None:
+        fields.append('signup_bonus_referrer = ?')
+        values.append(signup_bonus_referrer)
+    if signup_bonus_referred is not None:
+        fields.append('signup_bonus_referred = ?')
+        values.append(signup_bonus_referred)
+    if purchase_percent is not None:
+        fields.append('purchase_percent = ?')
+        values.append(purchase_percent)
+    if event_start_date is not None:
+        fields.append('event_start_date = ?')
+        values.append(event_start_date)
+    if event_end_date is not None:
+        fields.append('event_end_date = ?')
+        values.append(event_end_date)
+    if not fields:
+        conn.close()
+        return False
+    fields.append('updated_at = CURRENT_TIMESTAMP')
+    query = f'UPDATE referral_settings SET {", ".join(fields)} WHERE id = (SELECT id FROM referral_settings ORDER BY id DESC LIMIT 1)'
+    cursor.execute(query, values)
+    conn.commit()
+    success = cursor.rowcount > 0
+    conn.close()
+    return success
+
+def generate_unique_referral_code(user_id: int) -> str:
+    """تولید کد رفرال یکتا برای کاربر"""
+    import random, string
+    while True:
+        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT 1 FROM users WHERE referral_code = ?', (code,))
+        exists = cursor.fetchone() is not None
+        conn.close()
+        if not exists:
+            # ذخیره کد در دیتابیس برای کاربر
+            conn = get_db()
+            cursor = conn.cursor()
+            cursor.execute('UPDATE users SET referral_code = ? WHERE user_id = ?', (code, user_id))
+            conn.commit()
+            conn.close()
+            return code
+
+def get_user_by_referral_code(code: str):
+    """دریافت کاربر بر اساس کد رفرال"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id FROM users WHERE referral_code = ?', (code,))
+    result = cursor.fetchone()
+    conn.close()
+    return dict(result) if result else None
+
+def add_referral_log(referrer_id: int, referred_id: int, log_type: str, amount: int = 0):
+    """ثبت لاگ رفرال"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO referral_logs (referrer_id, referred_id, type, amount)
+        VALUES (?, ?, ?, ?)
+    ''', (referrer_id, referred_id, log_type, amount))
+    conn.commit()
+    conn.close()
+
+def get_referral_stats(user_id: int) -> Dict:
+    """دریافت آمار رفرال برای یک کاربر"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM referral_logs WHERE referrer_id = ? AND type = "signup"', (user_id,))
+    signups = cursor.fetchone()[0]
+    cursor.execute('SELECT SUM(amount) FROM referral_logs WHERE referrer_id = ? AND type = "purchase"', (user_id,))
+    earnings = cursor.fetchone()[0] or 0
+    conn.close()
+    return {'signups': signups, 'earnings': earnings}
+
+def reset_referral_stats(user_id: int = None):
+    """بازنشانی آمار رفرال (در صورت نیاز توسط ادمین)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    if user_id:
+        cursor.execute('DELETE FROM referral_logs WHERE referrer_id = ?', (user_id,))
+        cursor.execute('UPDATE users SET referral_earnings = 0 WHERE user_id = ?', (user_id,))
+    else:
+        cursor.execute('DELETE FROM referral_logs')
+        cursor.execute('UPDATE users SET referral_earnings = 0')
     conn.commit()
     conn.close()
