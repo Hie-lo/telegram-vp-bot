@@ -2251,7 +2251,7 @@ def main():
     broadcast_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(broadcast_type_handler, pattern="^broadcast_type_")],
         states={
-            ASK_BROADCAST_CONTENT: [MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL | filters.Voice.ALL, broadcast_get_content)],
+            ASK_BROADCAST_CONTENT: [MessageHandler(filters.TEXT | filters.ATTACHMENT, broadcast_get_content)],  
             ASK_BROADCAST_FILTER: [CallbackQueryHandler(broadcast_filter_handler, pattern="^broadcast_filter_")],
             ASK_BROADCAST_CONFIRM: [CallbackQueryHandler(broadcast_confirm, pattern="^broadcast_confirm_yes$")],
         },
