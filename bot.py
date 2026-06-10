@@ -1490,10 +1490,15 @@ async def referral_set_bonus_referrer_get(update: Update, context: ContextTypes.
     except:
         await update.message.reply_text("❌ لطفاً یک عدد صحیح نامنفی وارد کنید:")
         return ASK_REFERRAL_BONUS_REFERRER
+    
     db.update_referral_settings(signup_bonus_referrer=amount)
-    await update.message.reply_text(f"✅ پاداش معرف به {amount:,} تومان تغییر کرد.")
+    
+    # ارسال یک پیام واحد با دکمه بازگشت
     keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="referral_admin_panel")]]
-    await update.message.reply_text("برای بازگشت، روی دکمه کلیک کنید.", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        f"✅ پاداش معرف به {amount:,} تومان تغییر کرد.\n\nبرای بازگشت روی دکمه کلیک کنید.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     return ConversationHandler.END
 
 # ---------- تنظیم پاداش معرفی‌شونده (referred) ----------
@@ -1518,10 +1523,14 @@ async def referral_set_bonus_referred_get(update: Update, context: ContextTypes.
     except:
         await update.message.reply_text("❌ لطفاً یک عدد صحیح نامنفی وارد کنید:")
         return ASK_REFERRAL_BONUS_REFERRED
+    
     db.update_referral_settings(signup_bonus_referred=amount)
-    await update.message.reply_text(f"✅ پاداش معرفی‌شونده به {amount:,} تومان تغییر کرد.")
+    
     keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="referral_admin_panel")]]
-    await update.message.reply_text("برای بازگشت، روی دکمه کلیک کنید.", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        f"✅ پاداش معرفی‌شونده به {amount:,} تومان تغییر کرد.\n\nبرای بازگشت روی دکمه کلیک کنید.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     return ConversationHandler.END
 
 # ---------- تنظیم درصد پورسانت خرید ----------
@@ -1546,10 +1555,14 @@ async def referral_set_purchase_percent_get(update: Update, context: ContextType
     except:
         await update.message.reply_text("❌ لطفاً یک عدد بین 0 تا 100 وارد کنید:")
         return ASK_REFERRAL_PURCHASE_PERCENT
+    
     db.update_referral_settings(purchase_percent=percent)
-    await update.message.reply_text(f"✅ درصد پورسانت خرید به {percent}% تغییر کرد.")
+    
     keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="referral_admin_panel")]]
-    await update.message.reply_text("برای بازگشت، روی دکمه کلیک کنید.", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(
+        f"✅ درصد پورسانت خرید به {percent}% تغییر کرد.\n\nبرای بازگشت روی دکمه کلیک کنید.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
     return ConversationHandler.END
 
 # ---------- تنظیم تاریخ شروع و پایان جشنواره ----------
@@ -1574,15 +1587,15 @@ async def referral_set_event_start_get(update: Update, context: ContextTypes.DEF
         await update.message.reply_text("✅ محدودیت تاریخ شروع برداشته شد.")
     else:
         try:
-            # تلاش برای parse تاریخ
             datetime.strptime(text, '%Y-%m-%d %H:%M:%S')
             db.update_referral_settings(event_start_date=text)
             await update.message.reply_text(f"✅ تاریخ شروع به {text} تنظیم شد.")
         except ValueError:
             await update.message.reply_text("❌ فرمت تاریخ نامعتبر. لطفاً دوباره وارد کنید (مثال: 2025-01-01 00:00:00) یا none:")
             return ASK_REFERRAL_EVENT_START
+    
     keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="referral_admin_panel")]]
-    await update.message.reply_text("برای بازگشت، روی دکمه کلیک کنید.", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("برای بازگشت روی دکمه کلیک کنید.", reply_markup=InlineKeyboardMarkup(keyboard))
     return ConversationHandler.END
 
 async def referral_set_event_end_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1612,8 +1625,9 @@ async def referral_set_event_end_get(update: Update, context: ContextTypes.DEFAU
         except ValueError:
             await update.message.reply_text("❌ فرمت تاریخ نامعتبر. لطفاً دوباره وارد کنید (مثال: 2025-01-01 00:00:00) یا none:")
             return ASK_REFERRAL_EVENT_END
+    
     keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="referral_admin_panel")]]
-    await update.message.reply_text("برای بازگشت، روی دکمه کلیک کنید.", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("برای بازگشت روی دکمه کلیک کنید.", reply_markup=InlineKeyboardMarkup(keyboard))
     return ConversationHandler.END
 
 # ---------- بازنشانی آمار رفرال ----------
