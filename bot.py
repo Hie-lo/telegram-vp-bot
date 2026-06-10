@@ -29,6 +29,8 @@ ASK_REJECT_REASON = 11
 ASK_DEBIT_AMOUNT = 12
 ASK_ADMIN_USER_ID = 18
 ASK_REMOVE_ADMIN_USER_ID = 19
+ASK_TEST_REMINDER_TEXT = 20
+ASK_PRE_EXPIRE_MINUTES = 21
 
 # Helper functions for permissions
 def is_admin(user_id: int) -> bool:
@@ -72,6 +74,7 @@ def get_admin_panel_keyboard(owner: bool = False):
         keyboard.insert(4, [InlineKeyboardButton("📈 آمار پیشرفته", callback_data="advanced_stats")])
         keyboard.insert(2, [InlineKeyboardButton("👑 مدیریت ادمین‌ها", callback_data="admin_manage_admins")])  
         keyboard.insert(5, [InlineKeyboardButton("🔄 ری‌استارت ربات", callback_data="restart_bot")])
+        keyboard.insert(6, [InlineKeyboardButton("⚙️ تنظیمات پیام تست", callback_data="test_reminder_settings")])
     keyboard.append([InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main")])
     return InlineKeyboardMarkup(keyboard)
 
@@ -620,6 +623,109 @@ async def view_payment_details(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.delete_message()
 
 
+# ==================== TEST REMINDER SETTINGS (OWNER ONLY) ====================
+
+async def test_reminder_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """نمایش منوی تنظیمات پیام تست (فقط مالک)"""
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(query.from_user.id):
+        await query.edit_message_text("❌ فقط مالک ربات به این بخش دسترسی دارد.", reply_markup=get_back_button())
+        return
+    
+    settings = db.get_test_reminder_settings()
+    status_text = "✅ فعال" if settings.get('is_active', 1) else "❌ غیرفعال"
+    keyboard = [
+        [InlineKeyboardButton(f"🔘 وضعیت: {status_text}", callback_data="toggle_test_reminder")],
+        [InlineKeyboardButton("✏️ تغییر متن پیام", callback_data="edit_test_reminder_text")],
+        [InlineKeyboardButton("⏱ تغییر زمان یادآوری (قبل از اتمام)", callback_data="edit_pre_expire_minutes")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel")]
+    ]
+    text = f"⚙️ **تنظیمات پیام تست**\n\n"
+    text += f"📌 وضعیت: {status_text}\n"
+    text += f"⏰ یادآوری قبل از اتمام: {settings.get('pre_expire_minutes', 5)} دقیقه\n"
+    text += f"📝 متن پیام:\n{settings.get('message_text', '')}\n"
+    await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def toggle_test_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تغییر وضعیت فعال/غیرفعال پیام تست"""
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(query.from_user.id):
+        await query.edit_message_text("❌ دسترسی غیرمجاز")
+        return
+    
+    settings = db.get_test_reminder_settings()
+    new_status = not settings.get('is_active', 1)
+    db.update_test_reminder_settings(is_active=new_status)
+    await test_reminder_settings_menu(update, context)
+
+async def edit_test_reminder_text_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """شروع ویرایش متن پیام تست"""
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(query.from_user.id):
+        await query.edit_message_text("❌ دسترسی غیرمجاز")
+        return
+    
+    await query.edit_message_text(
+        "✏️ **ویرایش متن پیام تست**\n\n"
+        "متن جدید را ارسال کنید. می‌توانید از ایموجی و Markdown استفاده کنید.\n"
+        "برای لغو، /cancel را بزنید.",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="test_reminder_settings")]])
+    )
+    return ASK_TEST_REMINDER_TEXT
+
+async def edit_test_reminder_text_get(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت متن جدید و ذخیره"""
+    new_text = update.message.text.strip()
+    if not new_text:
+        await update.message.reply_text("❌ متن نمی‌تواند خالی باشد. دوباره ارسال کنید یا /cancel")
+        return ASK_TEST_REMINDER_TEXT
+    
+    db.update_test_reminder_settings(message_text=new_text)
+    await update.message.reply_text("✅ متن پیام تست با موفقیت به‌روز شد.")
+    # نمایش مجدد منوی تنظیمات
+    # برای سادگی، از یک پیام جدید استفاده می‌کنیم
+    keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="test_reminder_settings")]]
+    await update.message.reply_text("⚙️ برای بازگشت به منوی تنظیمات، روی دکمه کلیک کنید.", reply_markup=InlineKeyboardMarkup(keyboard))
+    return ConversationHandler.END
+
+async def edit_pre_expire_minutes_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """شروع تغییر زمان یادآوری قبل از اتمام"""
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(query.from_user.id):
+        await query.edit_message_text("❌ دسترسی غیرمجاز")
+        return
+    
+    await query.edit_message_text(
+        "⏱ **تغییر زمان یادآوری قبل از اتمام تست**\n\n"
+        "لطفاً تعداد دقیقه (عدد بین 1 تا 30) را وارد کنید:\n"
+        "مثال: `5`",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="test_reminder_settings")]])
+    )
+    return ASK_PRE_EXPIRE_MINUTES
+
+async def edit_pre_expire_minutes_get(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """دریافت زمان جدید و ذخیره"""
+    try:
+        minutes = int(update.message.text.strip())
+        if minutes < 1 or minutes > 30:
+            raise ValueError
+    except:
+        await update.message.reply_text("❌ لطفاً یک عدد بین 1 تا 30 وارد کنید:")
+        return ASK_PRE_EXPIRE_MINUTES
+    
+    db.update_test_reminder_settings(pre_expire_minutes=minutes)
+    await update.message.reply_text(f"✅ زمان یادآوری به {minutes} دقیقه قبل از اتمام تغییر کرد.")
+    keyboard = [[InlineKeyboardButton("🔙 بازگشت به تنظیمات", callback_data="test_reminder_settings")]]
+    await update.message.reply_text("⚙️ برای بازگشت به منوی تنظیمات، روی دکمه کلیک کنید.", reply_markup=InlineKeyboardMarkup(keyboard))
+    return ConversationHandler.END
+
+
 # ==================== ADMIN MAKE TEST ====================
 
 async def admin_make_test_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1124,6 +1230,51 @@ async def restart_bot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sys.exit(0)
 
 
+async def check_test_reminders(context: ContextTypes.DEFAULT_TYPE):
+    """بررسی تست‌ها و ارسال پیام‌های یادآوری (هر دقیقه اجرا می‌شود)"""
+    settings = db.get_test_reminder_settings()
+    if not settings.get('is_active', 1):
+        return
+    
+    pre_minutes = settings.get('pre_expire_minutes', 5)
+    message_text = settings.get('message_text', '')
+    
+    # پیام قبل از انقضا
+    tests_pre = db.get_tests_needing_pre_reminder(pre_minutes)
+    for test in tests_pre:
+        user_id = test['user_id']
+        # ارسال پیام یادآوری 5 دقیقه قبل
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=f"⏰ **تست رایگان شما در {pre_minutes} دقیقه دیگر به پایان می‌رسد!**\n\nبرای ادامه استفاده، یکی از پلن‌های ما را خریداری کنید.",
+                parse_mode='Markdown'
+            )
+            db.mark_pre_reminder_sent(user_id)
+        except Exception as e:
+            logger.error(f"Pre-reminder failed for user {user_id}: {e}")
+    
+    # پیام پس از انقضا
+    tests_expired = db.get_expired_tests_needing_reminder()
+    for test in tests_expired:
+        user_id = test['user_id']
+        # ارسال پیام پس از اتمام تست با دکمه‌های خرید و شارژ
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📦 خرید پلن", callback_data="buy_plan")],
+            [InlineKeyboardButton("💳 شارژ کیف پول", callback_data="charge_wallet")]
+        ])
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=message_text,
+                parse_mode='Markdown',
+                reply_markup=keyboard if settings.get('include_buttons', 1) else None
+            )
+            db.mark_reminder_sent(user_id)
+        except Exception as e:
+            logger.error(f"Post-reminder failed for user {user_id}: {e}")
+
+
 # ==================== MAIN ====================
 
 def main():
@@ -1192,6 +1343,18 @@ def main():
         fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
         allow_reentry=True
     )
+        # conversation: edit test reminder text
+    edit_reminder_text_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(edit_test_reminder_text_start, pattern="^edit_test_reminder_text$")],
+        states={ASK_TEST_REMINDER_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_test_reminder_text_get)]},
+        fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
+    )
+    # conversation: edit pre-expire minutes
+    edit_pre_expire_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(edit_pre_expire_minutes_start, pattern="^edit_pre_expire_minutes$")],
+        states={ASK_PRE_EXPIRE_MINUTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_pre_expire_minutes_get)]},
+        fallbacks=[CommandHandler("cancel", manual_charge_cancel)],
+    )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("delete_plan", delete_plan_command))
@@ -1204,6 +1367,10 @@ def main():
     app.add_handler(add_plan_conv)
     app.add_handler(add_admin_conv)
     app.add_handler(remove_admin_conv)
+    app.add_handler(edit_reminder_text_conv)
+    app.add_handler(edit_pre_expire_conv)
+    app.add_handler(CallbackQueryHandler(test_reminder_settings_menu, pattern="^test_reminder_settings$"))
+    app.add_handler(CallbackQueryHandler(toggle_test_reminder, pattern="^toggle_test_reminder$"))
     app.add_handler(CommandHandler("addadmin", add_admin_start))
     app.add_handler(CommandHandler("addplan", add_plan_start))
     app.add_handler(CallbackQueryHandler(restart_bot, pattern="^restart_bot$"))
@@ -1238,6 +1405,13 @@ def main():
     
     app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_receipt))
     
+        # راه‌اندازی JobQueue برای یادآوری تست
+    job_queue = app.job_queue
+    if job_queue:
+        job_queue.run_repeating(check_test_reminders, interval=60, first=10)
+    else:
+        logger.warning("JobQueue not available! Test reminders will not work.")
+
     print("🤖 ربات با موفقیت روشن شد...")
     app.run_polling()
 

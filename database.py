@@ -1,7 +1,6 @@
 import sqlite3
-from datetime import datetime
 from typing import Optional, Dict, List, Tuple
-
+from datetime import datetime, timedelta
 DB_NAME = 'pasarguard_data.db'
 
 def get_db():
@@ -125,6 +124,8 @@ def init_db():
     conn.commit()
     conn.close()
     init_payment_table()
+    add_test_reminder_columns()
+    init_test_reminder_settings()
     add_panel_username_column()
     add_reject_reason_column()
     init_default_owner()
@@ -686,3 +687,130 @@ def add_panel_username_column():
         pass
     finally:
         conn.close()
+
+def add_test_reminder_columns():
+    """Add reminder_sent and pre_reminder_sent columns to test_requests if not exist"""
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('ALTER TABLE test_requests ADD COLUMN pre_reminder_sent BOOLEAN DEFAULT 0')
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute('ALTER TABLE test_requests ADD COLUMN reminder_sent BOOLEAN DEFAULT 0')
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    finally:
+        conn.close()
+
+def init_test_reminder_settings():
+    """Create test_reminder_settings table if not exists and insert default row"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS test_reminder_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            is_active BOOLEAN DEFAULT 1,
+            pre_expire_minutes INTEGER DEFAULT 5,
+            message_text TEXT DEFAULT '⏰ تست رایگان شما به پایان رسید. اگر از کیفیت کانفیگ راضی بودی، برای ادامه استفاده یکی از پلن‌های ما رو تهیه کن!',
+            include_buttons BOOLEAN DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    # اگر رکوردی وجود ندارد، یک رکورد پیش‌فرض درج کن
+    cursor.execute('SELECT COUNT(*) FROM test_reminder_settings')
+    if cursor.fetchone()[0] == 0:
+        cursor.execute('''
+            INSERT INTO test_reminder_settings (is_active, pre_expire_minutes, message_text, include_buttons)
+            VALUES (1, 5, '⏰ تست رایگان شما به پایان رسید. اگر از کیفیت کانفیگ راضی بودی، برای ادامه استفاده یکی از پلن‌های ما رو تهیه کن!', 1)
+        ''')
+    conn.commit()
+    conn.close()
+
+
+def get_test_reminder_settings() -> Dict:
+    """Get current test reminder settings"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM test_reminder_settings ORDER BY id DESC LIMIT 1')
+    result = cursor.fetchone()
+    conn.close()
+    return dict(result) if result else {}
+
+def update_test_reminder_settings(is_active: bool = None, pre_expire_minutes: int = None, message_text: str = None) -> bool:
+    """Update test reminder settings"""
+    conn = get_db()
+    cursor = conn.cursor()
+    fields = []
+    values = []
+    if is_active is not None:
+        fields.append('is_active = ?')
+        values.append(1 if is_active else 0)
+    if pre_expire_minutes is not None:
+        fields.append('pre_expire_minutes = ?')
+        values.append(pre_expire_minutes)
+    if message_text is not None:
+        fields.append('message_text = ?')
+        values.append(message_text)
+    if not fields:
+        conn.close()
+        return False
+    fields.append('updated_at = CURRENT_TIMESTAMP')
+    query = f'UPDATE test_reminder_settings SET {", ".join(fields)} WHERE id = (SELECT id FROM test_reminder_settings ORDER BY id DESC LIMIT 1)'
+    cursor.execute(query, values)
+    conn.commit()
+    success = cursor.rowcount > 0
+    conn.close()
+    return success
+
+def get_tests_needing_pre_reminder(minutes_before: int = 5) -> List[Dict]:
+    """
+    دریافت تست‌هایی که در 'minutes_before' دقیقه آینده منقضی می‌شوند و پیام قبل از انقضایشان ارسال نشده است
+    """
+    conn = get_db()
+    cursor = conn.cursor()
+    now = datetime.now()
+    expire_threshold = now + timedelta(minutes=minutes_before)
+    cursor.execute('''
+        SELECT user_id, expire_time FROM test_requests
+        WHERE expire_time IS NOT NULL
+        AND expire_time BETWEEN ? AND ?
+        AND pre_reminder_sent = 0
+    ''', (now, expire_threshold))
+    results = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in results]
+
+def get_expired_tests_needing_reminder() -> List[Dict]:
+    """دریافت تست‌هایی که منقضی شده‌اند و پیام پس از انقضایشان ارسال نشده است"""
+    conn = get_db()
+    cursor = conn.cursor()
+    now = datetime.now()
+    cursor.execute('''
+        SELECT user_id, expire_time FROM test_requests
+        WHERE expire_time IS NOT NULL
+        AND expire_time < ?
+        AND reminder_sent = 0
+    ''', (now,))
+    results = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in results]
+
+def mark_pre_reminder_sent(user_id: int):
+    """علامت‌گذاری ارسال پیام قبل از انقضا برای کاربر"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE test_requests SET pre_reminder_sent = 1 WHERE user_id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+
+def mark_reminder_sent(user_id: int):
+    """علامت‌گذاری ارسال پیام پس از انقضا برای کاربر"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE test_requests SET reminder_sent = 1 WHERE user_id = ?', (user_id,))
+    conn.commit()
+    conn.close()
