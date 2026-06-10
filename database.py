@@ -1125,11 +1125,11 @@ def add_sales_log(order_id: int, user_id: int, plan_id: int, traffic_gb: int,
     return True
 
 def get_accounting_summary() -> Dict:
-    """دریافت خلاصه حسابداری"""
+    """دریافت خلاصه حسابداری با احتساب پاداش‌های رفرال و واریزها"""
     conn = get_db()
     cursor = conn.cursor()
     
-    # کل فروش
+    # کل فروش (درآمد ناخالص از فروش پلن‌ها)
     cursor.execute('SELECT SUM(user_price) FROM sales_logs')
     total_sales = cursor.fetchone()[0] or 0
     
@@ -1137,21 +1137,29 @@ def get_accounting_summary() -> Dict:
     cursor.execute('SELECT SUM(panel_cost) FROM sales_logs')
     total_panel_cost = cursor.fetchone()[0] or 0
     
-    # کل هزینه رفرال
-    cursor.execute('SELECT SUM(referral_cost) FROM sales_logs')
-    total_referral_cost = cursor.fetchone()[0] or 0
+    # کل پاداش رفرال پرداختی (از referral_logs)
+    cursor.execute('SELECT SUM(amount) FROM referral_logs')
+    total_referral_payout = cursor.fetchone()[0] or 0
     
-    # کل سود خالص
-    cursor.execute('SELECT SUM(net_profit) FROM sales_logs')
-    total_net_profit = cursor.fetchone()[0] or 0
+    # کل واریزهای نقدی تأیید شده
+    cursor.execute('SELECT SUM(amount) FROM payment_requests WHERE status = "approved"')
+    total_deposits = cursor.fetchone()[0] or 0
+    
+    # موجودی فعلی کیف پول کاربران
+    cursor.execute('SELECT SUM(balance) FROM users')
+    current_wallet_balance = cursor.fetchone()[0] or 0
+    
+    # سود خالص واقعی = فروش - هزینه پنل - پاداش رفرال
+    real_net_profit = total_sales - total_panel_cost - total_referral_payout
     
     conn.close()
     return {
         'total_sales': total_sales,
         'total_panel_cost': total_panel_cost,
-        'total_referral_cost': total_referral_cost,
-        'total_net_profit': total_net_profit,
-        'due_to_panel': total_panel_cost  # بدهی به صاحب پنل
+        'total_referral_payout': total_referral_payout,
+        'total_deposits': total_deposits,
+        'current_wallet_balance': current_wallet_balance,
+        'real_net_profit': real_net_profit
     }
 
 def export_accounting_to_excel():
@@ -1204,6 +1212,114 @@ def export_accounting_to_excel():
         ws.append(list(row))
     
     # Adjust widths
+    for col in ws.columns:
+        max_length = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = min(max_length + 2, 30)
+        ws.column_dimensions[col_letter].width = adjusted_width
+    
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+    wb.save(temp_file.name)
+    temp_file.close()
+    return temp_file.name
+
+def get_total_referral_payouts() -> int:
+    """مجموع پاداش‌های پرداختی از طریق رفرال (ثبت‌نام + خرید)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    # جمع مبالغ referral_logs (که هم برای ثبت‌نام و هم برای خرید ثبت شده)
+    cursor.execute('SELECT SUM(amount) FROM referral_logs')
+    total = cursor.fetchone()[0] or 0
+    conn.close()
+    return total
+
+def get_total_deposits() -> int:
+    """مجموع واریزهای نقدی تأیید شده (از payment_requests با status='approved')"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT SUM(amount) FROM payment_requests WHERE status = "approved"')
+    total = cursor.fetchone()[0] or 0
+    conn.close()
+    return total
+
+# ==================== User List Pagination ====================
+
+def get_users_paginated(page: int = 1, per_page: int = 10, order_by: str = 'newest'):
+    """دریافت لیست کاربران با صفحه‌بندی"""
+    conn = get_db()
+    cursor = conn.cursor()
+    offset = (page - 1) * per_page
+    order_clause = "ORDER BY created_at DESC" if order_by == 'newest' else "ORDER BY created_at ASC"
+    cursor.execute(f'''
+        SELECT user_id, username, first_name, balance, created_at, is_banned
+        FROM users
+        {order_clause}
+        LIMIT ? OFFSET ?
+    ''', (per_page, offset))
+    users = cursor.fetchall()
+    conn.close()
+    return [dict(u) for u in users]
+
+def count_users() -> int:
+    """تعداد کل کاربران"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM users')
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+
+def export_users_to_excel():
+    """Generate Excel file from all users and return file path"""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    import tempfile
+    import os
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT user_id, username, first_name, balance, created_at, 
+               COALESCE(is_banned, 0) as is_banned,
+               COALESCE(referrer_id, '') as referrer_id,
+               COALESCE(referral_code, '') as referral_code
+        FROM users
+        ORDER BY created_at DESC
+    ''')
+    users = cursor.fetchall()
+    conn.close()
+    
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "لیست کاربران"
+    
+    headers = ['شناسه کاربر', 'یوزرنیم', 'نام', 'موجودی (تومان)', 'تاریخ عضویت', 'وضعیت بن', 'معرف (ID)', 'کد رفرال']
+    ws.append(headers)
+    
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    for col in range(1, len(headers)+1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+    
+    for u in users:
+        ws.append([
+            u[0], u[1] or '', u[2] or '', u[3] or 0, u[4], 
+            'بن شده' if u[5] else 'فعال',
+            u[6] or '', u[7] or ''
+        ])
+    
+    # تنظیم عرض ستون‌ها
     for col in ws.columns:
         max_length = 0
         col_letter = col[0].column_letter

@@ -499,23 +499,63 @@ async def admin_list_plans_menu(update: Update, context: ContextTypes.DEFAULT_TY
     await query.edit_message_text(txt, parse_mode='Markdown', reply_markup=get_back_button())
 
 async def admin_list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """نمایش لیست کاربران با صفحه‌بندی (ادمین‌ها)"""
     query = update.callback_query
     await query.answer()
     if not is_admin(query.from_user.id):
-        await query.edit_message_text("❌ دسترسی غیرمجاز")
+        await query.edit_message_text("❌ دسترسی غیرمجاز", reply_markup=get_back_button())
         return
-    conn = db.get_db()
-    c = conn.cursor()
-    c.execute("SELECT user_id, username, first_name, balance FROM users ORDER BY created_at DESC LIMIT 20")
-    users = c.fetchall()
-    conn.close()
-    if not users:
-        txt = "👥 هنوز کاربری ثبت نشده."
-    else:
-        txt = "👥 **۲۰ کاربر آخر:**\n\n"
-        for u in users:
-            txt += f"🆔 `{u[0]}` | @{u[1] or '—'} | {u[2] or '—'} | {u[3]:,} تومان\n"
-    await query.edit_message_text(txt, reply_markup=get_back_button())
+    
+    # دریافت صفحه جاری از context (پیش‌فرض 1)
+    page = context.user_data.get('users_page', 1)
+    per_page = 10
+    total_users = db.count_users()
+    total_pages = (total_users + per_page - 1) // per_page
+    
+    if page < 1:
+        page = 1
+    if page > total_pages and total_pages > 0:
+        page = total_pages
+    
+    users = db.get_users_paginated(page, per_page, 'newest')
+    
+    # ساخت متن
+    text = f"👥 **لیست کاربران** (صفحه {page} از {total_pages})\n\n"
+    for u in users:
+        ban_status = "🚫 بن شده" if u.get('is_banned', 0) else "✅ فعال"
+        text += f"🆔 `{u['user_id']}`\n"
+        text += f"👤 @{u['username'] or 'بدون یوزرنیم'} | {u['first_name'] or 'نامشخص'}\n"
+        text += f"💰 موجودی: {u['balance']:,} تومان | {ban_status}\n"
+        text += f"📅 تاریخ عضویت: {u['created_at'][:16]}\n"
+        text += f"─────────────────\n"
+    
+    # کیبورد صفحه‌بندی
+    keyboard = []
+    nav_buttons = []
+    if page > 1:
+        nav_buttons.append(InlineKeyboardButton("◀️ قبلی", callback_data=f"users_page_{page-1}"))
+    if page < total_pages:
+        nav_buttons.append(InlineKeyboardButton("بعدی ▶️", callback_data=f"users_page_{page+1}"))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    # دکمه خروجی اکسل (فقط مالک)
+    if is_owner(query.from_user.id):
+        keyboard.append([InlineKeyboardButton("📥 خروجی اکسل کاربران", callback_data="export_users_excel")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="admin_panel")])
+    
+    await query.edit_message_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def users_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """تغییر صفحه در لیست کاربران"""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(query.from_user.id):
+        return
+    page = int(query.data.split('_')[2])
+    context.user_data['users_page'] = page
+    await admin_list_users(update, context)
 
 async def admin_total_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1798,7 +1838,7 @@ async def export_referral_report(update: Update, context: ContextTypes.DEFAULT_T
 
 # ==================== ACCOUNTING ====================
 async def accounting_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """نمایش خلاصه حسابداری (فقط مالک)"""
+    """نمایش خلاصه حسابداری (فقط مالک) با احتساب پاداش‌ها"""
     query = update.callback_query
     await query.answer()
     if not is_owner(query.from_user.id):
@@ -1807,13 +1847,16 @@ async def accounting_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     summary = db.get_accounting_summary()
     
-    text = f"📊 **گزارش حسابداری**\n\n"
-    text += f"💰 کل فروش: {summary['total_sales']:,} تومان\n"
-    text += f"🏭 هزینه پنل (بدهی به صاحب پنل): {summary['total_panel_cost']:,} تومان\n"
-    text += f"🎁 پاداش رفرال پرداختی: {summary['total_referral_cost']:,} تومان\n"
-    text += f"📈 سود خالص شما: {summary['total_net_profit']:,} تومان\n"
-    text += f"⚠️ مبلغ قابل برداشت (با احتیاط): {summary['total_sales'] - summary['total_panel_cost'] - summary['total_referral_cost']:,} تومان\n\n"
-    text += f"🔹 توصیه: حداقل {summary['total_panel_cost']:,} تومان را برای پرداخت به صاحب پنل نگه دارید."
+    text = f"📊 **گزارش حسابداری جامع**\n\n"
+    text += f"💰 **کل فروش پلن‌ها:** {summary['total_sales']:,} تومان\n"
+    text += f"🏭 **هزینه پنل (بدهی به صاحب پنل):** {summary['total_panel_cost']:,} تومان\n"
+    text += f"🎁 **کل پاداش‌های رفرال پرداختی:** {summary['total_referral_payout']:,} تومان\n"
+    text += f"📥 **کل واریزهای نقدی کاربران:** {summary['total_deposits']:,} تومان\n"
+    text += f"💼 **موجودی فعلی کیف پول کاربران:** {summary['current_wallet_balance']:,} تومان\n\n"
+    text += f"📈 **سود خالص واقعی شما:** {summary['real_net_profit']:,} تومان\n"
+    text += f"🔹 *سود خالص = فروش - هزینه پنل - پاداش رفرال*\n\n"
+    text += f"⚠️ **توصیه:** حداقل {summary['total_panel_cost']:,} تومان را برای پرداخت به صاحب پنل نگه دارید.\n"
+    text += f"🧾 **موجودی قابل برداشت (با احتیاط):** {summary['current_wallet_balance'] - summary['total_panel_cost']:,} تومان"
     
     keyboard = [
         [InlineKeyboardButton("📥 خروجی اکسل فروش", callback_data="export_accounting_excel")],
@@ -1849,6 +1892,33 @@ async def export_accounting_excel(update: Update, context: ContextTypes.DEFAULT_
     owner = is_owner(query.from_user.id)
     await context.bot.send_message(chat_id=query.from_user.id, text="⚙️ **پنل مدیریت**", parse_mode='Markdown', reply_markup=get_admin_panel_keyboard(owner))
 
+async def export_users_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Export all users to Excel (owner only)"""
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(query.from_user.id):
+        await query.edit_message_text("❌ فقط مالک ربات به این بخش دسترسی دارد.", reply_markup=get_back_button())
+        return
+    
+    await query.edit_message_text("⏳ در حال تولید فایل اکسل کاربران...")
+    try:
+        file_path = db.export_users_to_excel()
+        with open(file_path, 'rb') as f:
+            await context.bot.send_document(
+                chat_id=query.from_user.id,
+                document=f,
+                filename=f"users_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                caption="📊 **لیست کامل کاربران**\n\nتاریخ: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+        import os
+        os.remove(file_path)
+    except Exception as e:
+        logger.error(f"Excel export error: {e}")
+        await query.edit_message_text("❌ خطا در تولید فایل اکسل.", reply_markup=get_back_button())
+        return
+    
+    # بازگشت به لیست کاربران (با حفظ صفحه جاری)
+    await admin_list_users(update, context)
 
 # ==================== MAIN ====================
 
@@ -1991,6 +2061,9 @@ def main():
     app.add_handler(CallbackQueryHandler(view_payment_details, pattern="^view_payment_\\d+$"))
     
     app.add_handler(CallbackQueryHandler(approve_payment, pattern="^approve_payment_\\d+$"))
+
+    app.add_handler(CallbackQueryHandler(users_pagination, pattern="^users_page_\\d+$"))
+    app.add_handler(CallbackQueryHandler(export_users_excel, pattern="^export_users_excel$"))
 
     #Refferal-handlers
     app.add_handler(CallbackQueryHandler(ref_set_referrer_bonus, pattern="^ref_set_referrer_bonus$"))
