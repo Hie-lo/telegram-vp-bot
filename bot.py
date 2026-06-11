@@ -2339,6 +2339,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_receipt))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_test_user_input_simple))
 
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ref_setting_input), group=1)
 
     # ========== 3. Broadcast handlers ==========
     app.add_handler(CallbackQueryHandler(broadcast_start, pattern="^broadcast_start$"))
@@ -2353,6 +2354,7 @@ def main():
     app.add_handler(CommandHandler("cancel", manual_charge_cancel))
     app.add_handler(CommandHandler("addadmin", add_admin_start))
     app.add_handler(CommandHandler("addplan", add_plan_start))
+
 
     # ========== 5. CallbackQuery handlers (غیر از那些 که قبلاً اضافه شدند) ==========
     app.add_handler(CallbackQueryHandler(test_reminder_settings_menu, pattern="^test_reminder_settings$"))
@@ -2404,9 +2406,6 @@ def main():
     # Accounting handlers
     app.add_handler(CallbackQueryHandler(accounting_report, pattern="^accounting_report$"))
     app.add_handler(CallbackQueryHandler(export_accounting_excel, pattern="^export_accounting_excel$"))
-
-    # ========== 6. Message handlers (آخرین اولویت) ==========
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ref_setting_input), group=1)
     
     
     # JobQueue
