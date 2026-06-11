@@ -381,7 +381,7 @@ async def test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # ویرایش پیام قبلی به یک پیام ساده
         await query.edit_message_text(
-            "✅ سرور تست با موفقیت ساخته شد!\n🔗 لینک اشتراک در پیام جداگانه ارسال شد.",
+            "✅ سرور تست با موفقیت ساخته شد!\n🔗",
             reply_markup=get_back_button()
         )
     else:
@@ -890,7 +890,6 @@ async def edit_pre_expire_minutes_get(update: Update, context: ContextTypes.DEFA
     return ConversationHandler.END
 
 
-# ==================== ADMIN MAKE TEST ====================
 
 # ==================== ADMIN MAKE TEST (SIMPLE VERSION) ====================
 
@@ -960,8 +959,8 @@ async def cancel_test_simple(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def handle_test_user_input_simple(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """دریافت آیدی/یوزرنیم و ساخت تست"""
-    logger.info(f"handle_test_user_input_simple called with text: {update.message.text}")  # <-- اضافه کنید
-    logger.info(f"awaiting_test_user: {context.user_data.get('awaiting_test_user')}")    # <-- اضافه کنید
+    logger.info(f"handle_test_user_input_simple called with text: {update.message.text}") 
+    logger.info(f"awaiting_test_user: {context.user_data.get('awaiting_test_user')}")    
     logger.info(f"test_method: {context.user_data.get('test_method')}")      
     if not context.user_data.get('awaiting_test_user'):
         return
@@ -1006,7 +1005,7 @@ async def handle_test_user_input_simple(update: Update, context: ContextTypes.DE
             parse_mode='Markdown'
         )
         # ویرایش پیام قبلی
-        await msg.edit_text(f"✅ سرور تست برای کاربر @{user.get('username') or str(uid)} ساخته شد. لینک در پیام جداگانه ارسال شد.")
+        await msg.edit_text(f"✅ سرور تست برای کاربر @{user.get('username') or str(uid)} ساخته شد.")
         try:
             await context.bot.send_message(
                 uid,
