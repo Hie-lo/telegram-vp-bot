@@ -313,8 +313,10 @@ async def handle_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute('UPDATE orders SET panel_username = ? WHERE id = ?', (panel_username, order_id))
         conn.commit()
         conn.close()
-            # پورسانت رفرال (اگر رفرال فعال باشد و کاربر توسط کسی معرفی شده باشد)
+        
+        # پورسانت رفرال (اگر رفرال فعال باشد و کاربر توسط کسی معرفی شده باشد)
         settings = db.get_referral_settings()
+        commission = 0
         if settings.get('is_active', 0):
             user_data = db.get_user(user_id)
             referrer_id = user_data.get('referrer_id')
@@ -328,9 +330,9 @@ async def handle_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await context.bot.send_message(referrer_id, f"🎉 کاربری که دعوت کردید خریدی انجام داد!\n💰 {commission:,} تومان به کیف پولتان اضافه شد.")
                     except:
                         pass
-            # ثبت لاگ حسابداری
+        
+        # ثبت لاگ حسابداری
         panel_cost_per_gb = 7000  # هزینه هر گیگ به صاحب پنل
-        referral_cost = commission if 'commission' in locals() else 0
         db.add_sales_log(
             order_id=order_id,
             user_id=user_id,
@@ -338,9 +340,21 @@ async def handle_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
             traffic_gb=plan['traffic_gb'],
             user_price=plan['price_rial'],
             panel_cost_per_gb=panel_cost_per_gb,
-            referral_cost=referral_cost
+            referral_cost=commission
         )
-        await query.edit_message_text(f"✅ **خرید موفق!**\n\n🔗 لینک اشتراک:\n`{result['config_link']}`", parse_mode='Markdown', reply_markup=get_back_button())
+        
+        # ارسال لینک اشتراک در یک پیام جداگانه (بدون دکمه بازگشت)
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"✅ **خرید موفق!**\n\n🔗 لینک اشتراک شما:\n`{result['config_link']}`\n\n📅 تاریخ انقضا: {plan['duration_days']} روز\n📊 حجم: {plan['traffic_gb']} گیگ",
+            parse_mode='Markdown'
+        )
+        
+        # ویرایش پیام قبلی به یک پیام ساده
+        await query.edit_message_text(
+            "✅ خرید شما با موفقیت انجام شد!\n🔗 لینک اشتراک در پیام جداگانه ارسال شد.",
+            reply_markup=get_back_button()
+        )
     else:
         db.update_balance(user_id, plan['price_rial'])
         await query.edit_message_text("❌ خطا در پنل، مبلغ برگشت خورد.", reply_markup=get_back_button())
@@ -357,15 +371,27 @@ async def test_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if result and result.get('success'):
         expire_time = datetime.now() + timedelta(minutes=60)
         db.add_test_request(user_id, expire_time)
-        await query.edit_message_text(f"🎁 **سرور تست آماده شد!**\n\n🔗 لینک:\n`{result['config_link']}`\n\n⏱ 60 دقیقه معتبر است.", parse_mode='Markdown', reply_markup=get_back_button())
+        
+        # ارسال لینک اشتراک در یک پیام جداگانه (بدون دکمه بازگشت)
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"🎁 **سرور تست آماده شد!**\n\n🔗 لینک اشتراک:\n`{result['config_link']}`\n\n⏱ 60 دقیقه معتبر است.\n⚡ حجم: 100 مگابایت",
+            parse_mode='Markdown'
+        )
+        
+        # ویرایش پیام قبلی به یک پیام ساده
+        await query.edit_message_text(
+            "✅ سرور تست با موفقیت ساخته شد!\n🔗 لینک اشتراک در پیام جداگانه ارسال شد.",
+            reply_markup=get_back_button()
+        )
     else:
         await query.edit_message_text("❌ خطا در ساخت سرور تست.", reply_markup=get_back_button())
+
 
 async def support(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.edit_message_text("📞 پشتیبانی: \n @Shadowlini \n @Mohammadfd8", reply_markup=get_back_button())
-
 
 # ==================== ADMIN PANEL ====================
 
@@ -972,13 +998,15 @@ async def handle_test_user_input_simple(update: Update, context: ContextTypes.DE
     result = pg_api.create_test_user()
     if result and result.get('success'):
         link = result['config_link']
-        await msg.edit_text(
-            f"✅ **سرور تست ساخته شد!**\n\n"
-            f"👤 کاربر: @{user.get('username') or str(uid)}\n"
-            f"🔗 لینک اشتراک:\n`{link}`",
-            parse_mode='Markdown',
-            reply_markup=get_admin_panel_keyboard(is_owner(update.effective_user.id))
+        await context.bot.send_message(
+            chat_id=update.effective_user.id,
+            text=f"✅ **سرور تست ساخته شد!**\n\n"
+                f"👤 کاربر: @{user.get('username') or str(uid)}\n"
+                f"🔗 لینک اشتراک:\n`{link}`",
+            parse_mode='Markdown'
         )
+        # ویرایش پیام قبلی
+        await msg.edit_text(f"✅ سرور تست برای کاربر @{user.get('username') or str(uid)} ساخته شد. لینک در پیام جداگانه ارسال شد.")
         try:
             await context.bot.send_message(
                 uid,
