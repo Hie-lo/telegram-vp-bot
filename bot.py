@@ -2335,7 +2335,10 @@ def main():
     app.add_handler(CallbackQueryHandler(test_by_id_simple, pattern="^test_by_id_simple$"))
     app.add_handler(CallbackQueryHandler(test_by_username_simple, pattern="^test_by_username_simple$"))
     app.add_handler(CallbackQueryHandler(cancel_test_simple, pattern="^cancel_test_simple$"))
+
+    app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_receipt))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_test_user_input_simple))
+
 
     # ========== 3. Broadcast handlers ==========
     app.add_handler(CallbackQueryHandler(broadcast_start, pattern="^broadcast_start$"))
@@ -2404,7 +2407,7 @@ def main():
 
     # ========== 6. Message handlers (آخرین اولویت) ==========
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_ref_setting_input), group=1)
-    app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, handle_receipt))
+    
     
     # JobQueue
     if app.job_queue:
